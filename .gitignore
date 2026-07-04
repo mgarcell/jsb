@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+out.txt
+check_out.txt
+_b64_1.txt

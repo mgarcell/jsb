@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0d1117">
+<title>KVBL HQ</title>
+<style>
+:root{
+  --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#2d333b;
+  --fg:#e6edf3; --dim:#8b949e; --accent:#7c5cff; --purple:#5a3fd4;
+  --good:#3fb950; --bad:#f85149; --warn:#d29922; --gold:#e3b341;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{font-size:15px}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding-bottom:calc(58px + env(safe-area-inset-bottom))}
+h2{font-size:1.05rem;margin:14px 12px 8px;display:flex;align-items:center;gap:8px}
+h3{font-size:.9rem;margin:10px 0 6px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+.small{font-size:.75rem;color:var(--dim)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin:8px 12px;padding:10px 12px}
+button{font:inherit;color:var(--fg);background:var(--panel2);border:1px solid var(--line);
+  border-radius:8px;padding:7px 12px;cursor:pointer}
+button.primary{background:var(--purple);border-color:var(--accent)}
+button.mini{padding:3px 8px;font-size:.75rem;border-radius:6px}
+select,input,textarea{font:inherit;color:var(--fg);background:var(--panel2);border:1px solid var(--line);
+  border-radius:8px;padding:7px 9px;max-width:100%}
+input[type=number]{width:5.2em}
+textarea{width:100%;min-height:150px;font-family:ui-monospace,Consolas,monospace;font-size:.8rem}
+table{border-collapse:collapse;width:100%;font-size:.8rem}
+th,td{padding:5px 6px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--dim);font-weight:600;position:sticky;top:0;background:var(--panel);cursor:pointer}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* bottom nav */
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--panel);
+  border-top:1px solid var(--line);z-index:50;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:none;border-radius:0;color:var(--dim);
+  font-size:.62rem;padding:7px 0 6px;display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button .ico{font-size:1.15rem;line-height:1}
+nav button.on{color:var(--accent)}
+.page{display:none}.page.on{display:block}
+/* player rows */
+.prow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.prow .kv{font-size:1.15rem;font-weight:700;width:2.6em;text-align:center;border-radius:8px;padding:4px 0}
+.prow .who{flex:1;min-width:0}
+.prow .who .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow .nums{text-align:right;font-size:.72rem;color:var(--dim);line-height:1.5}
+.badge{display:inline-block;font-size:.65rem;border:1px solid var(--line);border-radius:5px;
+  padding:0 4px;color:var(--dim);margin-left:4px}
+.pos-b{color:var(--accent);border-color:var(--accent)}
+.up{color:var(--good)}.dn{color:var(--bad)}.flat{color:var(--warn)}
+.tag-rfa{color:var(--warn);border-color:var(--warn)}.tag-ufa{color:var(--good);border-color:var(--good)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:8px 12px 2px}
+.chips button{white-space:nowrap;border-radius:99px;padding:5px 12px;font-size:.78rem}
+.chips button.on{background:var(--purple);border-color:var(--accent)}
+.searchbar{display:flex;gap:8px;padding:8px 12px 0}
+.searchbar input{flex:1}
+/* modal */
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;display:none;align-items:flex-end}
+#modal.on{display:flex}
+#modal .sheet{background:var(--panel);border-radius:16px 16px 0 0;width:100%;max-height:88vh;
+  overflow-y:auto;padding:16px 14px calc(20px + env(safe-area-inset-bottom))}
+.rgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin:8px 0}
+.rgrid div{background:var(--panel2);border-radius:7px;padding:4px 2px;text-align:center}
+.rgrid .lab{font-size:.6rem;color:var(--dim)}
+.rgrid .val{font-size:.92rem;font-weight:700}
+.statline{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0;font-size:.82rem}
+.statline b{font-size:.95rem}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mrow{display:flex;justify-content:space-between;padding:3px 0;font-size:.85rem}
+.bar{height:7px;background:var(--panel2);border-radius:4px;overflow:hidden;margin:2px 0 6px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.capbar{position:relative;height:20px;background:var(--panel2);border-radius:6px;overflow:hidden;margin:4px 0}
+.capbar i{position:absolute;top:0;bottom:0;left:0;background:var(--purple)}
+.capbar em{position:absolute;top:0;bottom:0;width:2px;background:var(--gold)}
+.capbar em.hard{background:var(--bad)}
+.capbar span{position:absolute;right:6px;font-size:.7rem;line-height:20px;font-style:normal}
+.trside{border:1px dashed var(--line);border-radius:10px;padding:6px;margin:6px 0;min-height:40px}
+.pick-pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:99px;padding:4px 10px;margin:3px;font-size:.78rem}
+.pick-pill b{color:var(--bad);cursor:pointer}
+.star{cursor:pointer;font-size:1.15rem;color:var(--dim)}
+.star.on{color:var(--gold)}
+.dc-line{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:5px 0;border-bottom:1px solid var(--line)}
+.dc-line select,.dc-line input{padding:4px 5px;font-size:.8rem}
+.ok{color:var(--good)}.err{color:var(--bad)}
+.note{font-size:.72rem;color:var(--dim);margin:4px 12px}
+.copybtn{position:relative}
+</style>
+</head>
+<body>
+
+<div id="pg-home" class="page"></div>
+<div id="pg-players" class="page"></div>
+<div id="pg-teams" class="page"></div>
+<div id="pg-trade" class="page"></div>
+<div id="pg-fa" class="page"></div>
+<div id="pg-draft" class="page"></div>
+<div id="pg-depth" class="page"></div>
+
+<nav id="nav"></nav>
+<div id="modal"><div class="sheet" id="modal-body"></div></div>
+
+<script>
+const D = /*__DATA__*/null;
+
+/* ───────── helpers ───────── */
+const $ = (s,el=document)=>el.querySelector(s);
+const esc = s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt1 = v=>v==null?"–":(v>0?"+":"")+v.toFixed(1);
+const money = v=>v==null?"–":"$"+v.toFixed(2)+"M";
+const LS = {get:(k,d)=>{try{const v=localStorage.getItem("kvbl_"+k);return v?JSON.parse(v):d}catch(e){return d}},
+            set:(k,v)=>localStorage.setItem("kvbl_"+k,JSON.stringify(v))};
+const MY = LS.get("myteam","Kings");
+const CAP=70, HARD=95, MLE=5.0;
+
+/* flatten players */
+const ALL=[];                      // rostered
+for(const t in D.teams) for(const p of D.teams[t].players) ALL.push(p);
+const FA = D.fa_pool||[];
+const byName = {};
+for(const p of ALL.concat(FA)) if(!(p.name in byName)||p.team) byName[p.name]=p;
+const elig = n => (D.eligibility&&D.eligibility[n]) ? D.eligibility[n] : null;
+const eligStr = p => { const e=elig(p.name); return e?e.join("/"):p.pos; };
+const salary = p => (p.contract&&p.contract.length)?p.contract[0]:null;
+const kvColor = v => v>=85?"rgba(63,185,80,.25)":v>=65?"rgba(124,92,255,.25)":v>=40?"rgba(139,148,158,.18)":"rgba(248,81,73,.2)";
+const trendIco = t => t==="rising"?'<span class="up">▲▲</span>':t==="improving"?'<span class="up">▲</span>':
+                      t==="peak"?'<span class="flat">◆</span>':t==="declining"?'<span class="dn">▼</span>':'<span class="dn">▼▼</span>';
+const teamRec = t => { const s=D.standings.find(x=>x.team===t); return s?`${s.w}-${s.l}`:""; };
+
+function playerRow(p, extra=""){
+  const s=salary(p);
+  return `<div class="prow" onclick="showPlayer('${esc(p.name).replace(/'/g,"\\'")}')">
+    <div class="kv" style="background:${kvColor(p.KV||0)}">${p.KV!=null?Math.round(p.KV):"–"}</div>
+    <div class="who">
+      <div class="nm">${esc(p.name)} ${trendIco(p.trend)}</div>
+      <div class="small">${eligStr(p)} · ${p.age}y · ${p.team?esc(p.team):`<span class="badge tag-${(p.fa||"fa").toLowerCase()}">${p.fa}</span>`}
+        ${s!=null?" · "+money(s):""}${extra}</div>
+    </div>
+    <div class="nums">
+      BPM ${fmt1(p.sBPM??p.pBPM)} (${fmt1(p.sOBPM??p.pOBPM)}/${fmt1(p.sDBPM??p.pDBPM)})<br>
+      PER ${(p.sPER??p.pPER)??"–"} · proj ${fmt1(p.pBPM)}
+    </div></div>`;
+}
+
+/* ───────── player modal ───────── */
+window.showPlayer = function(name){
+  const p = byName[name]; if(!p) return;
+  const r=p.r||{}, s=p.s;
+  const rk=["2ga","2g%","fta","ft%","3ga","3g%","orb","drb","ast","stl","to","blk"];
+  const sk=["o-o","d-o","p-o","t-o","o-d","d-d","p-d","t-d"];
+  let h=`<h2 style="margin:0 0 2px">${esc(p.name)} ${trendIco(p.trend)}</h2>
+  <div class="small">${eligStr(p)} · age ${p.age} · ${p.team?esc(p.team)+" ("+teamRec(p.team)+")":(p.fa||"Free agent")}</div>
+  <div class="grid2" style="margin-top:10px">
+    <div class="card" style="margin:0">
+      <h3>Impact (stats)</h3>
+      <div class="mrow"><span>BPM</span><b>${fmt1(p.sBPM)}</b></div>
+      <div class="mrow"><span>OBPM</span><b>${fmt1(p.sOBPM)}</b></div>
+      <div class="mrow"><span>DBPM</span><b>${fmt1(p.sDBPM)}</b></div>
+      <div class="mrow"><span>PER</span><b>${p.sPER??"–"}</b></div>
+    </div>
+    <div class="card" style="margin:0">
+      <h3>Impact (ratings)</h3>
+      <div class="mrow"><span>pBPM</span><b>${fmt1(p.pBPM)}</b></div>
+      <div class="mrow"><span>pOBPM</span><b>${fmt1(p.pOBPM)}</b></div>
+      <div class="mrow"><span>pDBPM</span><b>${fmt1(p.pDBPM)}</b></div>
+      <div class="mrow"><span>pPER</span><b>${p.pPER??"–"}</b></div>
+    </div></div>
+  <div class="card" style="margin:8px 0"><h3>KV rating</h3>
+    <div class="bar"><i style="width:${p.KV||0}%"></i></div>
+    <div class="small"><b>${p.KV!=null?p.KV.toFixed(0):"–"}</b>/100 league percentile — 70% BPM + 30% PER, stats & projection blended by minutes</div></div>`;
+  if(s && s.min>0) h+=`<div class="card" style="margin:8px 0"><h3>Season (${s.g} g, ${s.min.toFixed(1)} mpg)</h3>
+    <div class="statline"><span><b>${s.ppg.toFixed(1)}</b> pts</span><span><b>${s.reb.toFixed(1)}</b> reb</span>
+    <span><b>${s.ast.toFixed(1)}</b> ast</span><span><b>${s.stl.toFixed(1)}</b> stl</span><span><b>${s.blk.toFixed(1)}</b> blk</span>
+    <span><b>${s.to.toFixed(1)}</b> to</span><span><b>${s.fgp.toFixed(1)}</b> fg%</span><span><b>${s["3gp"].toFixed(1)}</b> 3p%</span></div></div>`;
+  h+=`<h3 style="margin-left:2px">Ratings</h3><div class="rgrid">`+
+    rk.map(k=>`<div><div class="lab">${k}</div><div class="val">${r[k]??"–"}</div></div>`).join("")+`</div>
+  <div class="rgrid" style="grid-template-columns:repeat(8,1fr)">`+
+    sk.map(k=>`<div><div class="lab">${k}</div><div class="val">${r[k]??"–"}</div></div>`).join("")+`</div>`;
+  if(p.contract&&p.contract.length) h+=`<div class="card" style="margin:8px 0"><h3>Contract</h3>
+    <div class="statline">${p.contract.map((y,i)=>`<span>Y${i+1} <b>${money(y)}</b></span>`).join("")}</div></div>`;
+  h+=`<div style="text-align:center;margin-top:10px"><button onclick="closeModal()">Close</button></div>`;
+  $("#modal-body").innerHTML=h; $("#modal").classList.add("on");
+};
+window.closeModal=()=>$("#modal").classList.remove("on");
+$("#modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal()});
+
+/* ───────── HOME ───────── */
+function renderHome(){
+  const my = D.standings.find(s=>s.team===MY)||{};
+  const rank = D.standings.slice().sort((a,b)=>b.pct-a.pct).findIndex(s=>s.team===MY)+1;
+  const td = D.teams[MY]||{players:[]};
+  const payroll = td.players.reduce((a,p)=>a+(salary(p)||0),0);
+  const conf = {};
+  for(const s of D.standings) (conf[s.conf]=conf[s.conf]||[]).push(s);
+  let h=`<h2>🏀 KVBL HQ <span class="small" style="font-weight:400">built ${D.built||""}</span></h2>
+  <div class="card"><h3>${esc(MY)} — ${my.w??"?"}-${my.l??"?"} (#${rank} overall)</h3>
+    <div class="small">Payroll ${money(payroll)} · Cap $${CAP}M · Hard cap $${HARD}M
+      ${td.ctx?` · Net ${fmt1(td.ctx.net)} (O ${td.ctx.ortg} / D ${td.ctx.drtg})`:""}</div>
+    <div class="capbar"><i style="width:${Math.min(100,payroll/HARD*100)}%"></i>
+      <em style="left:${CAP/HARD*100}%"></em><em class="hard" style="left:99%"></em>
+      <span>${payroll>CAP?"OVER CAP":"cap room "+money(CAP-payroll)}</span></div></div>`;
+  for(const c in conf){
+    h+=`<div class="card"><h3>${esc(c)}</h3><div class="scroll"><table><tr><th>Team</th><th>W-L</th><th>Pct</th><th>GB</th><th>Net</th></tr>`;
+    for(const s of conf[c].slice().sort((a,b)=>b.pct-a.pct)){
+      const ctx=(D.teams[s.team]||{}).ctx;
+      h+=`<tr onclick="openTeam('${esc(s.team)}')" style="cursor:pointer${s.team===MY?';color:var(--accent);font-weight:700':''}">
+        <td>${esc(s.team)}</td><td>${s.w}-${s.l}</td><td>${s.pct.toFixed(3)}</td><td>${esc(s.gb)}</td><td>${ctx?fmt1(ctx.net):""}</td></tr>`;
+    }
+    h+=`</table></div></div>`;
+  }
+  if(D.injuries&&D.injuries.length){
+    h+=`<div class="card"><h3>Injuries</h3>`+D.injuries.slice(0,15).map(i=>
+      `<div class="mrow"><span>${esc(i.name)} <span class="badge">${esc(i.team)}</span></span><span class="small">${esc(i.injury)} · ${esc(i.days)}d</span></div>`).join("")+`</div>`;
+  }
+  h+=`<div class="card"><h3>Latest transactions</h3>`+(D.transactions||[]).slice(0,20).map(t=>
+    `<div class="mrow" style="gap:8px"><span class="small" style="white-space:nowrap">${esc(t.date)}</span><span style="text-align:right;font-size:.78rem">${esc(t.text)}</span></div>`).join("")+`</div>`;
+  h+=`<div class="note">League pace ${D.league.pace} poss/48 · BPM: 0 = league avg, +2 good starter, +4 all-star, +6 all-league · PER avg 15</div>`;
+  $("#pg-home").innerHTML=h;
+}
+
+/* ───────── PLAYERS ───────── */
+const P = {q:"", pos:"ALL", sort:"KV", pool:"rostered"};
+function renderPlayers(){
+  const sorts={KV:"KV",BPM:p=>p.sBPM??p.pBPM,OBPM:p=>p.sOBPM??p.pOBPM,DBPM:p=>p.sDBPM??p.pDBPM,
+    pBPM:"pBPM",PER:p=>p.sPER??p.pPER,Age:p=>-p.age,Salary:p=>salary(p)||0,
+    Value:p=>{const s=salary(p);return s?(p.KV||0)/s:0}};
+  let h=`<div class="searchbar"><input id="pq" placeholder="Search player…" value="${esc(P.q)}">
+    <select id="ppool"><option value="rostered">Rostered</option><option value="all">+ FAs</option></select>
+    <select id="psort">${Object.keys(sorts).map(k=>`<option${k===P.sort?" selected":""}>${k}</option>`).join("")}</select></div>
+  <div class="chips">${["ALL","PG","SG","SF","PF","C"].map(x=>
+    `<button class="${P.pos===x?"on":""}" onclick="P.pos='${x}';renderPlayers()">${x}</button>`).join("")}</div>`;
+  let list = P.pool==="all"?ALL.concat(FA):ALL.slice();
+  if(P.pos!=="ALL") list=list.filter(p=>{const e=elig(p.name);return e?e.includes(P.pos):p.pos===P.pos});
+  if(P.q) list=list.filter(p=>p.name.toLowerCase().includes(P.q.toLowerCase()));
+  const s=sorts[P.sort];
+  list.sort((a,b)=>(typeof s==="string"?(b[s]??-99)-(a[s]??-99):(s(b)??-99)-(s(a)??-99)));
+  h+=list.slice(0,150).map(p=>playerRow(p)).join("");
+  h+=`<div class="note">${list.length} players · showing top 150 · tap a player for detail</div>`;
+  $("#pg-players").innerHTML=h;
+  $("#pq").addEventListener("input",e=>{P.q=e.target.value;renderPlayers();
+    const el=$("#pq");el.focus();el.setSelectionRange(el.value.length,el.value.length)});
+  $("#psort").addEventListener("change",e=>{P.sort=e.target.value;renderPlayers()});
+  $("#ppool").value=P.pool;
+  $("#ppool").addEventListener("change",e=>{P.pool=e.target.value;renderPlayers()});
+}
+
+/* ───────── TEAMS ───────── */
+let curTeam = MY;
+window.openTeam = t=>{curTeam=t;go("teams")};
+function renderTeams(){
+  const names=Object.keys(D.teams).sort();
+  const td=D.teams[curTeam]||{players:[],contracts:[],picks:[]};
+  const years=[0,1,2,3,4,5].map(y=>td.players.reduce((a,p)=>a+((p.contract||[])[y]||0),0));
+  let h=`<h2>Teams</h2><div style="padding:0 12px"><select id="tsel" style="width:100%">${
+    names.map(n=>`<option${n===curTeam?" selected":""}>${n}</option>`).join("")}</select></div>
+  <div class="card"><h3>${esc(curTeam)} — ${teamRec(curTeam)} ${td.ctx?`· Net ${fmt1(td.ctx.net)} · O ${td.ctx.ortg} · D ${td.ctx.drtg} · pace ${td.ctx.pace}`:""}</h3>
+    <h3 style="margin-top:8px">Payroll by year (cap $${CAP}M, hard $${HARD}M)</h3>`;
+  years.forEach((v,i)=>{ if(v>0.01||i<3) h+=`<div class="mrow"><span>Year ${i+1}</span>
+    <span><b class="${v>HARD?"err":v>CAP?"flat":""}">${money(v)}</b> <span class="small">(${v>CAP?"−":"+"}${Math.abs(CAP-v).toFixed(1)} vs cap)</span></span></div>`;});
+  if(td.picks&&td.picks.length) h+=`<h3 style="margin-top:8px">Draft picks</h3><div class="small">${
+    td.picks.map(p=>`${esc(p.pick)}${p.from&&p.from!==curTeam?" (from "+esc(p.from)+")":""}`).join(" · ")}</div>`;
+  h+=`</div>`;
+  h+=td.players.slice().sort((a,b)=>(b.KV||0)-(a.KV||0)).map(p=>playerRow(p)).join("");
+  $("#pg-teams").innerHTML=h;
+  $("#tsel").addEventListener("change",e=>{curTeam=e.target.value;renderTeams()});
+}
+
+/* ───────── TRADE ───────── */
+const T = LS.get("trade",{a:MY,b:"",pa:[],pb:[],ka:"",kb:""});
+function tside(team,key){
+  const td=D.teams[team]; if(!td) return "";
+  const sel=T[key];
+  return `<div class="trside">${td.players.slice().sort((a,b)=>(b.KV||0)-(a.KV||0)).map(p=>{
+    const on=sel.includes(p.name);
+    return `<span class="pick-pill" style="${on?"border-color:var(--accent);background:var(--purple)":""}"
+      onclick="tToggle('${key}','${esc(p.name).replace(/'/g,"\\'")}')">${esc(p.name.split(" ").pop())}
+      <span class="small">${Math.round(p.KV||0)}·${money(salary(p))}</span></span>`;}).join("")}</div>
+  <input placeholder="picks, e.g. 2012 R1" style="width:100%" value="${esc(T[key==="pa"?"ka":"kb"])}"
+    onchange="T.${key==="pa"?"ka":"kb"}=this.value;tSave()">`;
+}
+window.tToggle=(key,name)=>{const i=T[key].indexOf(name);i>=0?T[key].splice(i,1):T[key].push(name);tSave();};
+function tSave(){LS.set("trade",T);renderTrade();}
+function tStats(team,names){
+  const ps=(D.teams[team]?D.teams[team].players:[]).filter(p=>names.includes(p.name));
+  return {n:ps.length, sal:ps.reduce((a,p)=>a+(salary(p)||0),0),
+    sal2:ps.reduce((a,p)=>a+((p.contract||[])[1]||0),0),
+    bpm:ps.reduce((a,p)=>a+(p.sBPM??p.pBPM??0),0),
+    pbpm:ps.reduce((a,p)=>a+(p.pBPM??0),0),
+    kv:ps.length?ps.reduce((a,p)=>a+(p.KV||0),0)/ps.length:0, ps};
+}
+function renderTrade(){
+  const names=Object.keys(D.teams).sort();
+  if(!T.b) T.b=names.find(n=>n!==T.a)||"";
+  const A=tStats(T.a,T.pa), B=tStats(T.b,T.pb);
+  const payA=D.teams[T.a]?D.teams[T.a].players.reduce((a,p)=>a+(salary(p)||0),0):0;
+  const payB=D.teams[T.b]?D.teams[T.b].players.reduce((a,p)=>a+(salary(p)||0),0):0;
+  const newA=payA-A.sal+B.sal, newB=payB-B.sal+A.sal;
+  const cntA=(D.teams[T.a]?.players.length||0)-A.n+B.n, cntB=(D.teams[T.b]?.players.length||0)-B.n+A.n;
+  let h=`<h2>⇄ Trade analyzer</h2>
+  <div class="card"><div class="grid2">
+    <div><select id="ta" style="width:100%">${names.map(n=>`<option${n===T.a?" selected":""}>${n}</option>`).join("")}</select>
+      <div class="small" style="margin:4px 0 2px">sends:</div>${tside(T.a,"pa")}</div>
+    <div><select id="tb" style="width:100%">${names.map(n=>`<option${n===T.b?" selected":""}>${n}</option>`).join("")}</select>
+      <div class="small" style="margin:4px 0 2px">sends:</div>${tside(T.b,"pb")}</div>
+  </div></div>`;
+  if(A.n||B.n){
+    const dB=(B.bpm-A.bpm), dP=(B.pbpm-A.pbpm);
+    h+=`<div class="card"><h3>Verdict for ${esc(T.a)}</h3>
+    <div class="mrow"><span>BPM in − out</span><b class="${dB>0?"ok":dB<0?"err":""}">${fmt1(dB)}</b></div>
+    <div class="mrow"><span>proj BPM in − out</span><b class="${dP>0?"ok":dP<0?"err":""}">${fmt1(dP)}</b></div>
+    <div class="mrow"><span>Salary Y1: out ${money(A.sal)} / in ${money(B.sal)}</span><b>${fmt1(B.sal-A.sal).replace("+","+$")}M</b></div>
+    <div class="mrow"><span>Avg KV: out ${A.kv.toFixed(0)} / in ${B.kv.toFixed(0)}</span></div>
+    <h3 style="margin-top:8px">Cap check</h3>
+    <div class="mrow"><span>${esc(T.a)} payroll after</span><b class="${newA>HARD?"err":newA>CAP?"flat":"ok"}">${money(newA)}${newA>HARD?" — OVER HARD CAP":newA>CAP?" (over cap)":""}</b></div>
+    <div class="mrow"><span>${esc(T.b)} payroll after</span><b class="${newB>HARD?"err":newB>CAP?"flat":"ok"}">${money(newB)}${newB>HARD?" — OVER HARD CAP":newB>CAP?" (over cap)":""}</b></div>
+    <div class="mrow"><span>Roster sizes after</span><span>${esc(T.a)}: ${cntA} · ${esc(T.b)}: ${cntB}</span></div>
+    <button class="primary" style="margin-top:8px;width:100%" onclick="copyTrade()">📋 Copy trade post</button></div>
+    <div class="note">Rules: min-contract-only trades in-season need a player or R2 back · over-hard-cap after deadline = lose Bird rights + next R1</div>`;
+  }
+  $("#pg-trade").innerHTML=h;
+  $("#ta").addEventListener("change",e=>{T.a=e.target.value;T.pa=[];tSave()});
+  $("#tb").addEventListener("change",e=>{T.b=e.target.value;T.pb=[];tSave()});
+}
+window.copyTrade=()=>{
+  const A=tStats(T.a,T.pa),B=tStats(T.b,T.pb);
+  const line=(t,st,k)=>`${t} send: ${st.ps.map(p=>p.name+" ("+money(salary(p))+")").join(", ")}${k?", "+k:""}`;
+  copyText(`TRADE PROPOSAL\n${line(T.a,A,T.ka)}\n${line(T.b,B,T.kb)}`);
+};
+
+/* ───────── FREE AGENCY ───────── */
+const F = {tab:"UFA", q:"", pos:"ALL", sort:"KV"};
+const stars = new Set(LS.get("stars",[]));
+window.toggleStar=n=>{stars.has(n)?stars.delete(n):stars.add(n);LS.set("stars",[...stars]);renderFA();};
+function renderFA(){
+  const payroll=D.teams[MY]?D.teams[MY].players.reduce((a,p)=>a+(salary(p)||0),0):0;
+  const room=CAP-payroll;
+  let h=`<h2>💰 Free agency</h2>
+  <div class="card"><div class="mrow"><span>${esc(MY)} payroll</span><b>${money(payroll)}</b></div>
+    <div class="mrow"><span>Cap room</span><b class="${room>0?"ok":"err"}">${money(room)}</b></div>
+    <div class="small">${room<=0?"Over cap → MLE ($5.00M) and vet-min offers only":"Room offers up to "+money(room)+" year 1"} · raises ≤7.5%/yr, not compounded · RFA offers min 2 years</div>
+    <button class="primary" style="margin-top:6px;width:100%" onclick="offerBuilder()">✍️ Offer builder</button></div>
+  <div class="chips">${["UFA","RFA","Next class","⭐"].map(x=>
+    `<button class="${F.tab===x?"on":""}" onclick="F.tab='${x}';renderFA()">${x}</button>`).join("")}</div>
+  <div class="searchbar"><input id="fq" placeholder="Search…" value="${esc(F.q)}">
+    <select id="fsort">${["KV","pBPM","pOBPM","pDBPM","pPER","Age"].map(k=>`<option${k===F.sort?" selected":""}>${k}</option>`).join("")}</select></div>
+  <div class="chips">${["ALL","PG","SG","SF","PF","C"].map(x=>
+    `<button class="${F.pos===x?"on":""}" onclick="F.pos='${x}';renderFA()">${x}</button>`).join("")}</div>`;
+  let list = F.tab==="⭐" ? FA.concat(ALL).filter(p=>stars.has(p.name))
+    : FA.filter(p=>F.tab==="UFA"?p.fa==="UFA":F.tab==="RFA"?p.fa==="RFA":p.fa==="FA");
+  if(F.pos!=="ALL") list=list.filter(p=>{const e=elig(p.name);return e?e.includes(F.pos):p.pos===F.pos});
+  if(F.q) list=list.filter(p=>p.name.toLowerCase().includes(F.q.toLowerCase()));
+  const key=F.sort==="Age"?(p=>-p.age):(p=>p[F.sort]??-99);
+  list.sort((a,b)=>key(b)-key(a));
+  h+=list.slice(0,120).map(p=>`<div style="display:flex;align-items:center">
+    <div style="flex:1">${playerRow(p, p.yrs!=null?` · ${p.yrs} yrs svc`:"")}</div>
+    <div class="star ${stars.has(p.name)?"on":""}" style="padding:0 12px" onclick="toggleStar('${esc(p.name).replace(/'/g,"\\'")}')">★</div></div>`).join("");
+  h+=`<div class="note">${list.length} players · p-metrics are projected from ratings (no team context). "Next class" = current fapreview page.</div>`;
+  $("#pg-fa").innerHTML=h;
+  $("#fq").addEventListener("input",e=>{F.q=e.target.value;renderFA();const el=$("#fq");el.focus();el.setSelectionRange(el.value.length,el.value.length)});
+  $("#fsort").addEventListener("change",e=>{F.sort=e.target.value;renderFA()});
+}
+window.offerBuilder=function(){
+  let h=`<h2 style="margin-top:0">Offer builder</h2>
+  <div class="grid2">
+    <label>Player<input id="ob-name" placeholder="Name" style="width:100%"></label>
+    <label>Years<select id="ob-years" style="width:100%">${[1,2,3,4,5].map(y=>`<option${y===3?" selected":""}>${y}</option>`).join("")}</select></label>
+    <label>Year 1 ($M)<input id="ob-y1" type="number" step="0.25" value="5.00" style="width:100%"></label>
+    <label>Raise %/yr<input id="ob-r" type="number" step="0.5" value="7.5" max="7.5" min="0" style="width:100%"></label>
+  </div>
+  <div style="display:flex;gap:6px;margin:8px 0">
+    <button class="mini" onclick="$('#ob-y1').value=${MLE};obCalc()">MLE $5.00</button>
+    <button class="mini" onclick="$('#ob-y1').value=1.51;obCalc()">Min 1.51</button>
+    <button class="mini" onclick="$('#ob-y1').value=2.06;obCalc()">Vet min 2.06</button>
+  </div>
+  <div class="card" style="margin:8px 0" id="ob-out"></div>
+  <button class="primary" style="width:100%" onclick="obCopy()">📋 Copy offer</button>
+  <div style="text-align:center;margin-top:8px"><button onclick="closeModal()">Close</button></div>`;
+  $("#modal-body").innerHTML=h; $("#modal").classList.add("on");
+  ["ob-years","ob-y1","ob-r","ob-name"].forEach(id=>$("#"+id).addEventListener("input",obCalc));
+  obCalc();
+};
+function obYears(){
+  const n=+$("#ob-years").value, y1=+$("#ob-y1").value, r=Math.min(7.5,+$("#ob-r").value)/100;
+  return Array.from({length:n},(_,i)=>y1*(1+r*i));   // NOT compounded
+}
+window.obCalc=function(){
+  const ys=obYears(), tot=ys.reduce((a,b)=>a+b,0);
+  $("#ob-out").innerHTML=`<div class="statline">${ys.map((v,i)=>`<span>Y${i+1} <b>${v.toFixed(2)}</b></span>`).join("")}</div>
+  <div class="small">Total ${money(tot)} over ${ys.length} yr${ys.length>1?"s":""}</div>`;
+};
+window.obCopy=function(){
+  const ys=obYears(), n=$("#ob-name").value||"[player]";
+  copyText(`${n}: ${ys.length} years — ${ys.map(v=>v.toFixed(2)).join(" / ")}`);
+};
+
+/* ───────── DRAFT ───────── */
+const dnotes = LS.get("dnotes",{});
+function renderDraft(){
+  const gradeVal=g=>{const m={"A+":12,"A":11,"A-":10,"B+":9,"B":8,"B-":7,"C+":6,"C":5,"C-":4,"D+":3,"D":2,"D-":1};return m[g.trim()]||0};
+  let list=(D.draft||[]).slice();
+  list.sort((a,b)=>{
+    const ra=dnotes[a.name]?.rank, rb=dnotes[b.name]?.rank;
+    if(ra&&rb) return ra-rb; if(ra) return -1; if(rb) return 1;
+    return gradeVal(b.grade)-gradeVal(a.grade);});
+  let h=`<h2>🎓 Draft board <span class="small">(${list.length} prospects — my rank first, then sheet grade)</span></h2>`;
+  h+=list.map(p=>{
+    const n=dnotes[p.name]||{};
+    return `<div class="card" style="padding:8px 10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="number" style="width:3.4em" placeholder="#" value="${n.rank||""}"
+          onchange="dSet('${esc(p.name).replace(/'/g,"\\'")}','rank',this.value)">
+        <div style="flex:1"><b>${esc(p.name)}</b><div class="small">${esc(p.pos)} · ${p.age}y</div></div>
+        <div class="kv" style="background:${p.grade.startsWith("A")?"rgba(63,185,80,.25)":p.grade.startsWith("B")?"rgba(124,92,255,.25)":"rgba(139,148,158,.18)"};padding:4px 8px;font-size:.95rem">${esc(p.grade)||"–"}</div>
+      </div>
+      <input style="width:100%;margin-top:6px;font-size:.78rem" placeholder="notes…" value="${esc(n.note||"")}"
+        onchange="dSet('${esc(p.name).replace(/'/g,"\\'")}','note',this.value)"></div>`;}).join("");
+  $("#pg-draft").innerHTML=h;
+}
+window.dSet=(name,k,v)=>{dnotes[name]=dnotes[name]||{};dnotes[name][k]=k==="rank"?(+v||null):v;LS.set("dnotes",dnotes);if(k==="rank")renderDraft();};
+
+/* ───────── DEPTH CHART ───────── */
+const DC = LS.get("depth",{slots:{PG:[],SG:[],SF:[],PF:[],C:[]},set:{}});
+function lastName(n){return n.trim().split(/\s+/).pop();}
+function renderDepth(){
+  const roster=(D.teams[MY]?D.teams[MY].players:[]).slice().sort((a,b)=>(b.KV||0)-(a.KV||0));
+  const used=new Set(Object.values(DC.slots).flat());
+  let h=`<h2>📋 Depth chart <span class="small">(${esc(MY)})</span></h2>
+  <div class="card"><h3>Assign positions (tap to cycle through eligible)</h3>`;
+  for(const pos of ["PG","SG","SF","PF","C"]){
+    h+=`<div class="dc-line"><b style="width:2.4em">${pos}</b>`;
+    for(const n of DC.slots[pos]) h+=`<span class="pick-pill">${esc(lastName(n))}<b onclick="dcRemove('${pos}','${esc(n).replace(/'/g,"\\'")}')">✕</b></span>`;
+    h+=`<select onchange="dcAdd('${pos}',this.value)"><option value="">+ add</option>${
+      roster.filter(p=>{const e=elig(p.name);return (e?e.includes(pos):p.pos===pos)&&!DC.slots[pos].includes(p.name)})
+        .map(p=>`<option>${esc(p.name)}</option>`).join("")}
+      <optgroup label="any position">${roster.filter(p=>!DC.slots[pos].includes(p.name)).map(p=>`<option>${esc(p.name)}</option>`).join("")}</optgroup></select></div>`;
+  }
+  h+=`</div><div class="card"><h3>Player settings — min / off / def / s1 / s2 / s3</h3>`;
+  const activeNames=[...new Set(Object.values(DC.slots).flat())];
+  for(const n of activeNames){
+    const s=DC.set[n]||(DC.set[n]={min:20,off:"d",def:"o",s1:"-",s2:"-",s3:"-"});
+    const opts=(cur,vals)=>vals.map(v=>`<option${String(cur)===String(v)?" selected":""}>${v}</option>`).join("");
+    h+=`<div class="dc-line"><span style="width:6.5em;overflow:hidden;text-overflow:ellipsis">${esc(lastName(n))}</span>
+      <input type="number" style="width:3.6em" value="${s.min}" min="0" max="40" onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','min',+this.value)">
+      ${["off","def"].map(k=>`<select onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','${k}',this.value)">${opts(s[k],["o","d","p"])}</select>`).join("")}
+      ${["s1","s2","s3"].map(k=>`<select onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','${k}',this.value)">${opts(s[k],["-","-2","-1","1","2"])}</select>`).join("")}
+    </div>`;
+  }
+  /* validation */
+  const totalMin=activeNames.reduce((a,n)=>a+(DC.set[n]?.min||0),0);
+  const checks=[
+    [activeNames.length>=10,`${activeNames.length}/10+ active players`],
+    [totalMin===240,`total minutes ${totalMin}/240`],
+    ...["PG","SG","SF","PF","C"].map(pos=>[DC.slots[pos].length>=2,`${pos}: ${DC.slots[pos].length}/2+`]),
+    [activeNames.every(n=>(DC.set[n]?.min||0)<=40),"max 40 min each"],
+  ];
+  h+=`</div><div class="card"><h3>Checks</h3>${checks.map(([ok,t])=>
+    `<div class="mrow"><span>${t}</span><b class="${ok?"ok":"err"}">${ok?"✓":"✗"}</b></div>`).join("")}</div>`;
+  /* output */
+  const out=["PG","SG","SF","PF","C"].map(pos=>`${pos}: ${DC.slots[pos].map(lastName).join(", ")}`).join("\n")
+    +"\n\n"+activeNames.map(n=>{const s=DC.set[n];return `${lastName(n)}: ${s.min}/${s.off}/${s.def}/${s.s1}/${s.s2}/${s.s3}`}).join("\n")
+    +"\n\nIR: the rest";
+  h+=`<div class="card"><h3>Forum post</h3><textarea id="dc-out" readonly>${esc(out)}</textarea>
+    <button class="primary" style="width:100%;margin-top:6px" onclick="copyText($('#dc-out').value)">📋 Copy depth chart</button></div>`;
+  $("#pg-depth").innerHTML=h;
+}
+window.dcAdd=(pos,n)=>{if(n){DC.slots[pos].push(n);LS.set("depth",DC);renderDepth();}};
+window.dcRemove=(pos,n)=>{DC.slots[pos]=DC.slots[pos].filter(x=>x!==n);LS.set("depth",DC);renderDepth();};
+window.dcSet=(n,k,v)=>{DC.set[n]=DC.set[n]||{};DC.set[n][k]=v;LS.set("depth",DC);renderDepth();};
+
+/* ───────── shared ───────── */
+window.copyText=t=>{navigator.clipboard.writeText(t).then(()=>{
+  const el=document.createElement("div");el.textContent="Copied ✓";
+  el.style.cssText="position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--good);color:#000;padding:6px 16px;border-radius:99px;z-index:200;font-weight:700";
+  document.body.appendChild(el);setTimeout(()=>el.remove(),1200);});};
+
+/* ───────── nav ───────── */
+const PAGES=[["home","🏠","Home",renderHome],["players","👤","Players",renderPlayers],
+  ["teams","🏟","Teams",renderTeams],["trade","⇄","Trade",renderTrade],
+  ["fa","💰","FA",renderFA],["draft","🎓","Draft",renderDraft],["depth","📋","Depth",renderDepth]];
+window.go=function(id){
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("on"));
+  $("#pg-"+id).classList.add("on");
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.id===id));
+  PAGES.find(p=>p[0]===id)[3]();
+  window.scrollTo(0,0);
+};
+$("#nav").innerHTML=PAGES.map(([id,ico,label])=>
+  `<button data-id="${id}" onclick="go('${id}')"><span class="ico">${ico}</span>${label}</button>`).join("");
+go("home");
+</script>
+</body>
+</html>
