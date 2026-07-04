@@ -122,8 +122,8 @@ for(const t in D.teams) for(const p of D.teams[t].players) ALL.push(p);
 const FA = D.fa_pool||[];
 const byName = {};
 for(const p of ALL.concat(FA)) if(!(p.name in byName)||p.team) byName[p.name]=p;
-const elig = n => (D.eligibility&&D.eligibility[n]) ? D.eligibility[n] : null;
-const eligStr = p => { const e=elig(p.name); return e?e.join("/"):p.pos; };
+const elig = p => (p.elig&&p.elig.length) ? p.elig : (p.pos?[p.pos]:[]);
+const eligStr = p => elig(p).join("/");
 const salary = p => (p.contract&&p.contract.length)?p.contract[0]:null;
 const kvColor = v => v>=85?"rgba(63,185,80,.25)":v>=65?"rgba(124,92,255,.25)":v>=40?"rgba(139,148,158,.18)":"rgba(248,81,73,.2)";
 const trendIco = t => t==="rising"?'<span class="up">▲▲</span>':t==="improving"?'<span class="up">▲</span>':
@@ -196,7 +196,7 @@ function renderHome(){
   const conf = {};
   for(const s of D.standings) (conf[s.conf]=conf[s.conf]||[]).push(s);
   let h=`<h2>🏀 KVBL HQ <span class="small" style="font-weight:400">built ${D.built||""}</span></h2>
-  <div class="card"><h3>${esc(MY)} — ${my.w??"?"}-${my.l??"?"} (#${rank} overall)</h3>
+  <div class="card" style="cursor:pointer" onclick="openTeam('${esc(MY)}')"><h3>${esc(MY)} — ${my.w??"?"}-${my.l??"?"} (#${rank} overall) <span class="small">tap for team page ›</span></h3>
     <div class="small">Payroll ${money(payroll)} · Cap $${CAP}M · Hard cap $${HARD}M
       ${td.ctx?` · Net ${fmt1(td.ctx.net)} (O ${td.ctx.ortg} / D ${td.ctx.drtg})`:""}</div>
     <div class="capbar"><i style="width:${Math.min(100,payroll/HARD*100)}%"></i>
@@ -215,8 +215,8 @@ function renderHome(){
     h+=`<div class="card"><h3>Injuries</h3>`+D.injuries.slice(0,15).map(i=>
       `<div class="mrow"><span>${esc(i.name)} <span class="badge">${esc(i.team)}</span></span><span class="small">${esc(i.injury)} · ${esc(i.days)}d</span></div>`).join("")+`</div>`;
   }
-  h+=`<div class="card"><h3>Latest transactions</h3>`+(D.transactions||[]).slice(0,20).map(t=>
-    `<div class="mrow" style="gap:8px"><span class="small" style="white-space:nowrap">${esc(t.date)}</span><span style="text-align:right;font-size:.78rem">${esc(t.text)}</span></div>`).join("")+`</div>`;
+  h+=`<div class="card"><h3>Latest official transactions <span class="small">(forum)</span></h3>`+(D.transactions||[]).slice(0,20).map(t=>
+    `<div class="mrow" style="gap:8px">${t.url?`<a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--fg);text-decoration:none;flex:1">${esc(t.text)} <span class="small">↗</span></a>`:`<span style="flex:1">${esc(t.text)}</span>`}<span class="small" style="white-space:nowrap">${esc(t.date)}</span></div>`).join("")+`</div>`;
   h+=`<div class="note">League pace ${D.league.pace} poss/48 · BPM: 0 = league avg, +2 good starter, +4 all-star, +6 all-league · PER avg 15</div>`;
   $("#pg-home").innerHTML=h;
 }
@@ -233,7 +233,7 @@ function renderPlayers(){
   <div class="chips">${["ALL","PG","SG","SF","PF","C"].map(x=>
     `<button class="${P.pos===x?"on":""}" onclick="P.pos='${x}';renderPlayers()">${x}</button>`).join("")}</div>`;
   let list = P.pool==="all"?ALL.concat(FA):ALL.slice();
-  if(P.pos!=="ALL") list=list.filter(p=>{const e=elig(p.name);return e?e.includes(P.pos):p.pos===P.pos});
+  if(P.pos!=="ALL") list=list.filter(p=>elig(p).includes(P.pos));
   if(P.q) list=list.filter(p=>p.name.toLowerCase().includes(P.q.toLowerCase()));
   const s=sorts[P.sort];
   list.sort((a,b)=>(typeof s==="string"?(b[s]??-99)-(a[s]??-99):(s(b)??-99)-(s(a)??-99)));
@@ -260,8 +260,14 @@ function renderTeams(){
     <h3 style="margin-top:8px">Payroll by year (cap $${CAP}M, hard $${HARD}M)</h3>`;
   years.forEach((v,i)=>{ if(v>0.01||i<3) h+=`<div class="mrow"><span>Year ${i+1}</span>
     <span><b class="${v>HARD?"err":v>CAP?"flat":""}">${money(v)}</b> <span class="small">(${v>CAP?"−":"+"}${Math.abs(CAP-v).toFixed(1)} vs cap)</span></span></div>`;});
-  if(td.picks&&td.picks.length) h+=`<h3 style="margin-top:8px">Draft picks</h3><div class="small">${
-    td.picks.map(p=>`${esc(p.pick)}${p.from&&p.from!==curTeam?" (from "+esc(p.from)+")":""}`).join(" · ")}</div>`;
+  if(td.picks&&td.picks.length){
+    const yrs=[...new Set(td.picks.map(p=>p.year).filter(Boolean))].sort();
+    const cell=(y,r)=>{const ps=td.picks.filter(p=>p.year===y&&p.round===r);
+      return ps.length?ps.map(p=>`<div>${p.from&&p.from!==curTeam?`<b class="ok">from ${esc(p.from)}</b>`:"own"} <span class="badge">${p.value??""}</span></div>`).join(""):`<span class="dn">—</span>`;};
+    h+=`<h3 style="margin-top:8px">Draft picks <span class="small">(badge = est. value 0-100)</span></h3>
+    <table><tr><th>Year</th><th>Round 1</th><th>Round 2</th></tr>${
+      yrs.map(y=>`<tr><td>${String(y)}-${String(y+1).slice(2)}</td><td>${cell(y,1)}</td><td>${cell(y,2)}</td></tr>`).join("")}</table>`;
+  }
   h+=`</div>`;
   h+=td.players.slice().sort((a,b)=>(b.KV||0)-(a.KV||0)).map(p=>playerRow(p)).join("");
   $("#pg-teams").innerHTML=h;
@@ -269,32 +275,43 @@ function renderTeams(){
 }
 
 /* ───────── TRADE ───────── */
-const T = LS.get("trade",{a:MY,b:"",pa:[],pb:[],ka:"",kb:""});
+const T = LS.get("trade",{a:MY,b:"",pa:[],pb:[],ka:[],kb:[]});
+if(!Array.isArray(T.ka))T.ka=[]; if(!Array.isArray(T.kb))T.kb=[];   // migrate old text inputs
+const pickLabel=pk=>`${String(pk.year).slice(2)}-${String(pk.year+1).slice(2)} R${pk.round}${pk.from&&pk.slot?"":""}`;
 function tside(team,key){
   const td=D.teams[team]; if(!td) return "";
-  const sel=T[key];
-  return `<div class="trside">${td.players.slice().sort((a,b)=>(b.KV||0)-(a.KV||0)).map(p=>{
+  const sel=T[key], pkey=key==="pa"?"ka":"kb", psel=T[pkey];
+  let h=`<div class="trside">${td.players.slice().sort((a,b)=>(b.KV||0)-(a.KV||0)).map(p=>{
     const on=sel.includes(p.name);
     return `<span class="pick-pill" style="${on?"border-color:var(--accent);background:var(--purple)":""}"
       onclick="tToggle('${key}','${esc(p.name).replace(/'/g,"\\'")}')">${esc(p.name.split(" ").pop())}
-      <span class="small">${Math.round(p.KV||0)}·${money(salary(p))}</span></span>`;}).join("")}</div>
-  <input placeholder="picks, e.g. 2012 R1" style="width:100%" value="${esc(T[key==="pa"?"ka":"kb"])}"
-    onchange="T.${key==="pa"?"ka":"kb"}=this.value;tSave()">`;
+      <span class="small">${Math.round(p.KV||0)}·${money(salary(p))}</span></span>`;}).join("")}</div>`;
+  const pks=(td.picks||[]).filter(pk=>pk.year);
+  if(pks.length) h+=`<div class="small" style="margin:4px 0 2px">picks:</div><div class="trside">${
+    pks.map((pk,i)=>{const on=psel.includes(i);
+    return `<span class="pick-pill" style="${on?"border-color:var(--gold);background:#3a3010":""}"
+      onclick="tPick('${pkey}',${i})">${pickLabel(pk)}${pk.from&&pk.from!==team?" ("+esc(pk.from)+")":""}
+      <span class="small" style="color:var(--gold)">${pk.value}</span></span>`;}).join("")}</div>`;
+  return h;
 }
 window.tToggle=(key,name)=>{const i=T[key].indexOf(name);i>=0?T[key].splice(i,1):T[key].push(name);tSave();};
+window.tPick=(pkey,idx)=>{const i=T[pkey].indexOf(idx);i>=0?T[pkey].splice(i,1):T[pkey].push(idx);tSave();};
 function tSave(){LS.set("trade",T);renderTrade();}
-function tStats(team,names){
-  const ps=(D.teams[team]?D.teams[team].players:[]).filter(p=>names.includes(p.name));
+function tStats(team,names,pickIdx){
+  const td=D.teams[team]||{players:[],picks:[]};
+  const ps=td.players.filter(p=>names.includes(p.name));
+  const pks=(td.picks||[]).filter((pk,i)=>pickIdx.includes(i)&&pk.year);
   return {n:ps.length, sal:ps.reduce((a,p)=>a+(salary(p)||0),0),
     sal2:ps.reduce((a,p)=>a+((p.contract||[])[1]||0),0),
     bpm:ps.reduce((a,p)=>a+(p.sBPM??p.pBPM??0),0),
     pbpm:ps.reduce((a,p)=>a+(p.pBPM??0),0),
-    kv:ps.length?ps.reduce((a,p)=>a+(p.KV||0),0)/ps.length:0, ps};
+    kv:ps.length?ps.reduce((a,p)=>a+(p.KV||0),0)/ps.length:0,
+    pv:pks.reduce((a,pk)=>a+(pk.value||0),0), ps, pks};
 }
 function renderTrade(){
   const names=Object.keys(D.teams).sort();
   if(!T.b) T.b=names.find(n=>n!==T.a)||"";
-  const A=tStats(T.a,T.pa), B=tStats(T.b,T.pb);
+  const A=tStats(T.a,T.pa,T.ka), B=tStats(T.b,T.pb,T.kb);
   const payA=D.teams[T.a]?D.teams[T.a].players.reduce((a,p)=>a+(salary(p)||0),0):0;
   const payB=D.teams[T.b]?D.teams[T.b].players.reduce((a,p)=>a+(salary(p)||0),0):0;
   const newA=payA-A.sal+B.sal, newB=payB-B.sal+A.sal;
@@ -306,11 +323,12 @@ function renderTrade(){
     <div><select id="tb" style="width:100%">${names.map(n=>`<option${n===T.b?" selected":""}>${n}</option>`).join("")}</select>
       <div class="small" style="margin:4px 0 2px">sends:</div>${tside(T.b,"pb")}</div>
   </div></div>`;
-  if(A.n||B.n){
-    const dB=(B.bpm-A.bpm), dP=(B.pbpm-A.pbpm);
+  if(A.n||B.n||A.pks.length||B.pks.length){
+    const dB=(B.bpm-A.bpm), dP=(B.pbpm-A.pbpm), dV=(B.pv-A.pv);
     h+=`<div class="card"><h3>Verdict for ${esc(T.a)}</h3>
     <div class="mrow"><span>BPM in − out</span><b class="${dB>0?"ok":dB<0?"err":""}">${fmt1(dB)}</b></div>
     <div class="mrow"><span>proj BPM in − out</span><b class="${dP>0?"ok":dP<0?"err":""}">${fmt1(dP)}</b></div>
+    <div class="mrow"><span>Pick value in − out <span class="small">(0-100 scale)</span></span><b class="${dV>0?"ok":dV<0?"err":""}">${fmt1(dV)}</b></div>
     <div class="mrow"><span>Salary Y1: out ${money(A.sal)} / in ${money(B.sal)}</span><b>${fmt1(B.sal-A.sal).replace("+","+$")}M</b></div>
     <div class="mrow"><span>Avg KV: out ${A.kv.toFixed(0)} / in ${B.kv.toFixed(0)}</span></div>
     <h3 style="margin-top:8px">Cap check</h3>
@@ -325,9 +343,11 @@ function renderTrade(){
   $("#tb").addEventListener("change",e=>{T.b=e.target.value;T.pb=[];tSave()});
 }
 window.copyTrade=()=>{
-  const A=tStats(T.a,T.pa),B=tStats(T.b,T.pb);
-  const line=(t,st,k)=>`${t} send: ${st.ps.map(p=>p.name+" ("+money(salary(p))+")").join(", ")}${k?", "+k:""}`;
-  copyText(`TRADE PROPOSAL\n${line(T.a,A,T.ka)}\n${line(T.b,B,T.kb)}`);
+  const A=tStats(T.a,T.pa,T.ka),B=tStats(T.b,T.pb,T.kb);
+  const pdesc=st=>st.pks.map(pk=>`${pk.year}-${pk.year+1} R${pk.round}${pk.from?" ("+pk.from+")":""}`).join(", ");
+  const line=(t,st)=>{const parts=[st.ps.map(p=>p.name+" ("+money(salary(p))+")").join(", "),pdesc(st)].filter(Boolean);
+    return `${t} send: ${parts.join(", ")||"nothing"}`;};
+  copyText(`TRADE PROPOSAL\n${line(T.a,A)}\n${line(T.b,B)}`);
 };
 
 /* ───────── FREE AGENCY ───────── */
@@ -337,8 +357,10 @@ window.toggleStar=n=>{stars.has(n)?stars.delete(n):stars.add(n);LS.set("stars",[
 function renderFA(){
   const payroll=D.teams[MY]?D.teams[MY].players.reduce((a,p)=>a+(salary(p)||0),0):0;
   const room=CAP-payroll;
-  let h=`<h2>💰 Free agency</h2>
-  <div class="card"><div class="mrow"><span>${esc(MY)} payroll</span><b>${money(payroll)}</b></div>
+  const fm=D.fa_meta||{};
+  let h=`<h2>💰 Free agency</h2>`;
+  if(fm.title) h+=`<div class="note">Pools auto-loaded from <a href="${esc(fm.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(fm.title)}</a>${fm.complete?" — this FA period is <b>complete</b>, so check “Next class” for who's coming up":""}</div>`;
+  h+=`<div class="card"><div class="mrow"><span>${esc(MY)} payroll</span><b>${money(payroll)}</b></div>
     <div class="mrow"><span>Cap room</span><b class="${room>0?"ok":"err"}">${money(room)}</b></div>
     <div class="small">${room<=0?"Over cap → MLE ($5.00M) and vet-min offers only":"Room offers up to "+money(room)+" year 1"} · raises ≤7.5%/yr, not compounded · RFA offers min 2 years</div>
     <button class="primary" style="margin-top:6px;width:100%" onclick="offerBuilder()">✍️ Offer builder</button></div>
@@ -350,7 +372,7 @@ function renderFA(){
     `<button class="${F.pos===x?"on":""}" onclick="F.pos='${x}';renderFA()">${x}</button>`).join("")}</div>`;
   let list = F.tab==="⭐" ? FA.concat(ALL).filter(p=>stars.has(p.name))
     : FA.filter(p=>F.tab==="UFA"?p.fa==="UFA":F.tab==="RFA"?p.fa==="RFA":p.fa==="FA");
-  if(F.pos!=="ALL") list=list.filter(p=>{const e=elig(p.name);return e?e.includes(F.pos):p.pos===F.pos});
+  if(F.pos!=="ALL") list=list.filter(p=>elig(p).includes(F.pos));
   if(F.q) list=list.filter(p=>p.name.toLowerCase().includes(F.q.toLowerCase()));
   const key=F.sort==="Age"?(p=>-p.age):(p=>p[F.sort]??-99);
   list.sort((a,b)=>key(b)-key(a));
@@ -405,7 +427,9 @@ function renderDraft(){
     const ra=dnotes[a.name]?.rank, rb=dnotes[b.name]?.rank;
     if(ra&&rb) return ra-rb; if(ra) return -1; if(rb) return 1;
     return gradeVal(b.grade)-gradeVal(a.grade);});
+  const dm=D.draft_meta||{};
   let h=`<h2>🎓 Draft board <span class="small">(${list.length} prospects — my rank first, then sheet grade)</span></h2>`;
+  if(dm.title) h+=`<div class="note">Latest draft thread: <a href="${esc(dm.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(dm.title)}</a> — grades auto-load from its sheet when one is posted</div>`;
   h+=list.map(p=>{
     const n=dnotes[p.name]||{};
     return `<div class="card" style="padding:8px 10px">
@@ -433,11 +457,12 @@ function renderDepth(){
     h+=`<div class="dc-line"><b style="width:2.4em">${pos}</b>`;
     for(const n of DC.slots[pos]) h+=`<span class="pick-pill">${esc(lastName(n))}<b onclick="dcRemove('${pos}','${esc(n).replace(/'/g,"\\'")}')">✕</b></span>`;
     h+=`<select onchange="dcAdd('${pos}',this.value)"><option value="">+ add</option>${
-      roster.filter(p=>{const e=elig(p.name);return (e?e.includes(pos):p.pos===pos)&&!DC.slots[pos].includes(p.name)})
+      roster.filter(p=>elig(p).includes(pos)&&!DC.slots[pos].includes(p.name))
         .map(p=>`<option>${esc(p.name)}</option>`).join("")}
       <optgroup label="any position">${roster.filter(p=>!DC.slots[pos].includes(p.name)).map(p=>`<option>${esc(p.name)}</option>`).join("")}</optgroup></select></div>`;
   }
-  h+=`</div><div class="card"><h3>Player settings — min / off / def / s1 / s2 / s3</h3>`;
+  h+=`</div><div class="card"><h3>Player settings</h3>
+  <div class="small" style="margin-bottom:4px">minutes / off style (o·d·p) / def style / <b>off focus</b> / <b>def focus</b> / <b>ball-handling focus</b></div>`;
   const activeNames=[...new Set(Object.values(DC.slots).flat())];
   for(const n of activeNames){
     const s=DC.set[n]||(DC.set[n]={min:20,off:"d",def:"o",s1:"-",s2:"-",s3:"-"});

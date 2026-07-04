@@ -20,6 +20,9 @@ Free agents / rookies (ratings only, no team) get the p-metrics and KV.
 """
 
 import math
+import re
+
+from scrape import norm_name
 
 POS_NUM = {"PG": 1.0, "SG": 2.0, "G": 1.5, "SF": 3.0, "F": 3.5, "PF": 4.0, "C": 5.0}
 
@@ -382,6 +385,42 @@ def compute_kv(all_players):
         p["KV"] = round(bisect.bisect_left(zs, p["_kvz"]) / max(1, n - 1) * 100, 1)
 
 
+# ────────────────────────────────────────────────────────────
+# Draft pick valuation
+# ────────────────────────────────────────────────────────────
+def value_picks(data):
+    """Attach an estimated slot + 0-100 value to every pick on every team.
+
+    Slot: the ORIGINAL owner's reverse-standings rank today (worst record →
+    pick 1).  A future year keeps the same slot estimate — best proxy we have.
+    Value curve (0-100, comparable to KV): R1 = 100·e^-(slot-1)/9,
+    R2 = 32·e^-(slot-1)/12, then discounted 7%/season of waiting.
+    """
+    order = sorted(data["standings"], key=lambda s: (s["pct"], -s["l"]))
+    slot = {s["team"]: i + 1 for i, s in enumerate(order)}
+    n = len(order) or 26
+
+    start_years = []
+    for td in data["teams"].values():
+        for pk in td["picks"]:
+            m = re.match(r"(\d{4})-\d{4}\s+round\s+(\d)", pk["pick"], re.I)
+            if m:
+                start_years.append(int(m.group(1)))
+    season = min(start_years) if start_years else 0
+    data["league"]["season"] = season
+
+    for team, td in data["teams"].items():
+        for pk in td["picks"]:
+            m = re.match(r"(\d{4})-\d{4}\s+round\s+(\d)", pk["pick"], re.I)
+            if not m:
+                continue
+            year, rnd = int(m.group(1)), int(m.group(2))
+            sl = slot.get(pk.get("from") or team, (n + 1) // 2)
+            base = 100 * math.exp(-(sl - 1) / 9.0) if rnd == 1 else 32 * math.exp(-(sl - 1) / 12.0)
+            pk.update(year=year, round=rnd, slot=sl,
+                      value=round(base * 0.93 ** max(0, year - season), 1))
+
+
 def age_trend(age):
     if age <= 23:
         return "rising"
@@ -434,8 +473,12 @@ def compute_all(data, log=print):
     compute_projected(everyone, models, league_pace, league_ptstsa, -8.0, -4.0)
     compute_kv(everyone)
 
+    # eligibility: accent-insensitive name match against the eligibility sheet;
+    # players not on the sheet fall back to their listed position
+    elig_norm = {norm_name(k): v for k, v in (data.get("eligibility") or {}).items()}
     for p in everyone:
         p["trend"] = age_trend(p.get("age", 27))
+        p["elig"] = elig_norm.get(norm_name(p["name"])) or ([p["pos"]] if p.get("pos") else [])
         # strip intermediates
         for k in list(p.keys()):
             if k.startswith("_"):
@@ -447,4 +490,5 @@ def compute_all(data, log=print):
     # regression slopes, for the curious
     data["models"] = {t: {"keys": ks, "beta": [round(b, 5) for b in beta]}
                       for t, (ks, beta) in models.items()}
+    value_picks(data)
     return data

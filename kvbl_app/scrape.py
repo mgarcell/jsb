@@ -15,10 +15,20 @@ import csv
 import html as htmlmod
 import io
 import re
+import subprocess
 import time
+import unicodedata
 import urllib.request
 
 BASE = "https://www.kvbl.net/"
+FORUM = "https://kvbl.boards.net"
+
+
+def norm_name(n):
+    """Accent/case-insensitive matching key ('Felício Nzola' == 'Felicio Nzola')."""
+    n = unicodedata.normalize("NFKD", n)
+    n = "".join(c for c in n if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", n).strip().lower()
 
 SHEETS = {
     # name: (spreadsheet id, gid or None for first sheet)
@@ -40,6 +50,11 @@ STAT_COLS = ["g", "gs", "min", "fgm", "fga", "fgp", "ftm", "fta", "ftp",
 
 
 def fetch(url, tries=3):
+    # boards.net serves a JS proof-of-work challenge to Python's TLS stack but
+    # not to curl, so forum pages go through the curl binary (present on
+    # Windows 10+ and on GitHub Actions runners)
+    if "boards.net" in url:
+        return fetch_curl(url, tries)
     last = None
     for attempt in range(tries):
         try:
@@ -49,6 +64,23 @@ def fetch(url, tries=3):
         except Exception as e:
             last = e
             time.sleep(1.5 * (attempt + 1))
+    raise last
+
+
+def fetch_curl(url, tries=3):
+    last = None
+    for attempt in range(tries):
+        try:
+            out = subprocess.run(
+                ["curl", "-sL", "--max-time", "30", url],
+                capture_output=True, timeout=45)
+            body = out.stdout.decode("utf-8", errors="replace")
+            if out.returncode == 0 and body:
+                return body
+            last = RuntimeError(f"curl rc={out.returncode}")
+        except Exception as e:
+            last = e
+        time.sleep(1.5 * (attempt + 1))
     raise last
 
 
@@ -269,6 +301,150 @@ def scrape_fapreview():
 
 
 # ────────────────────────────────────────────────────────────
+# Forum (ProBoards)
+# ────────────────────────────────────────────────────────────
+def forum_threads(board_path):
+    """Thread list for a board, in page order (newest activity first).
+    Returns [{url, title, date}] — date is the nearest timestamp after the
+    link in the HTML (the row's last-post time), best-effort."""
+    page = fetch(FORUM + board_path)
+    out, seen = [], set()
+    for m in re.finditer(r'href="(/thread/(\d+)/[^"]*)"[^>]*>(.*?)</a>', page):
+        href, tid, title = m.group(1), m.group(2), strip_tags(m.group(3))
+        if tid in seen or not title:
+            continue
+        seen.add(tid)
+        tail = page[m.end():m.end() + 3000]
+        dm = re.search(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w* \d+, \d{4})', tail)
+        out.append({"url": FORUM + href, "title": title,
+                    "date": dm.group(1) if dm else ""})
+    return out
+
+
+def scrape_forum_transactions(limit=30):
+    """Official transactions = threads on the KVBL Transactions board."""
+    out = []
+    for t in forum_threads("/board/8/kvbl-transactions"):
+        if t["title"].lower() in ("extensions",):     # pinned reference thread
+            continue
+        out.append({"date": t["date"], "text": t["title"], "url": t["url"]})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def latest_thread(board_path, pattern):
+    """Newest thread on a board whose title matches pattern (highest year wins)."""
+    best = None
+    for t in forum_threads(board_path):
+        m = re.search(pattern, t["title"], re.I)
+        if m:
+            yr = int(m.group(1))
+            if best is None or yr > best[0]:
+                best = (yr, t)
+    return best  # (year, thread) or None
+
+
+def sheet_links(thread_url):
+    """All Google-Sheets links in a thread (all pages), with doc id + gid."""
+    links, seen = [], set()
+    for pg in range(1, 6):
+        try:
+            page = fetch(f"{thread_url}?page={pg}")
+        except Exception:
+            break
+        found = re.findall(r'href="(https?://docs\.google\.com/spreadsheets/[^"]+)"', page)
+        if pg > 1 and not found:
+            break
+        for url in found:
+            im = re.search(r"/d/([A-Za-z0-9_-]+)", url)
+            gm = re.search(r"[#&?]gid=(\d+)", url)
+            if im and im.group(1) not in seen:
+                seen.add(im.group(1))
+                links.append((im.group(1), gm.group(1) if gm else None))
+        if "?page=" not in page or f"page={pg+1}" not in page:
+            break
+    return links
+
+
+def fetch_sheet_by_id(sid, gid=None):
+    url = f"https://docs.google.com/spreadsheets/d/{sid}/export?format=csv"
+    if gid is not None:
+        url += f"&gid={gid}"
+    return list(csv.reader(io.StringIO(fetch(url))))
+
+
+def parse_fa_rows(rows):
+    """FA-sheet rows → player dicts; None if the sheet isn't an FA ratings list."""
+    if not rows:
+        return None
+    header = [c.strip().lower() for c in rows[0]]
+    if "player" not in header or "2ga" not in header:
+        return None
+    idx = {c: i for i, c in enumerate(header)}
+    out = []
+    for row in rows[1:]:
+        if len(row) < 3 or not row[idx["player"]].strip():
+            continue
+        pos = row[idx.get("po", 0)].strip().upper()
+        if pos not in ("PG", "SG", "SF", "PF", "C", "G", "F"):
+            continue
+        p = {"name": row[idx["player"]].strip(), "pos": pos,
+             "age": int(num(row[idx.get("age", 2)])),
+             "r": {c: int(num(row[idx[c]])) for c in RATING_COLS if c in idx and len(row) > idx[c]}}
+        if "yrs" in idx and len(row) > idx["yrs"]:
+            p["yrs"] = int(num(row[idx["yrs"]]))
+        out.append(p)
+    return out if out else None
+
+
+def discover_fa(log=print):
+    """Find the newest 'YYYY KVBL Free Agency' thread on the general board and
+    load its RFA/UFA sheets.  UFA sheets carry a 'yrs' (service years) column;
+    that's how the two are told apart.  Returns (meta, rfa, ufa) with None
+    lists when discovery fails (caller falls back to configured sheet ids)."""
+    hit = latest_thread("/board/9/kvbl-general", r"(\d{4})\s+KVBL\s+Free\s+Agency")
+    if not hit:
+        return None, None, None
+    year, th = hit
+    meta = {"year": year, "title": th["title"], "url": th["url"],
+            "complete": "complete" in th["title"].lower()}
+    rfa = ufa = None
+    for sid, gid in sheet_links(th["url"]):
+        try:
+            players = parse_fa_rows(fetch_sheet_by_id(sid, gid))
+        except Exception as e:
+            log(f"  [WARN] FA sheet {sid[:8]}…: {e}")
+            continue
+        if not players:
+            continue
+        if any("yrs" in p for p in players):
+            ufa = ufa or players
+        else:
+            rfa = rfa or players
+    return meta, rfa, ufa
+
+
+def discover_draft(log=print):
+    """Find the newest 'YYYY KVBL Draft' thread and any grades sheet inside it."""
+    hit = latest_thread("/board/9/kvbl-general", r"(\d{4})\s+KVBL\s+Draft")
+    if not hit:
+        return None, None
+    year, th = hit
+    meta = {"year": year, "title": th["title"], "url": th["url"],
+            "complete": "complete" in th["title"].lower()}
+    for sid, gid in sheet_links(th["url"]):
+        try:
+            rows = fetch_sheet_by_id(sid, gid)
+            header = [c.strip().lower() for c in rows[0]] if rows else []
+            if "name" in header and "grade" in header:
+                return meta, parse_draft_rows(rows)
+        except Exception as e:
+            log(f"  [WARN] draft sheet {sid[:8]}…: {e}")
+    return meta, None
+
+
+# ────────────────────────────────────────────────────────────
 # Google Sheets
 # ────────────────────────────────────────────────────────────
 def fetch_sheet(key):
@@ -289,7 +465,10 @@ def scrape_eligibility():
 
 
 def scrape_draft_sheet():
-    rows = fetch_sheet("draft")
+    return parse_draft_rows(fetch_sheet("draft"))
+
+
+def parse_draft_rows(rows):
     if not rows:
         return []
     header = [c.strip().lower() for c in rows[0]]
@@ -347,11 +526,9 @@ def scrape_all(log=print):
             log(f"  [WARN] {t}: {e}")
 
     for key, fn in [("injuries", scrape_injuries),
-                    ("transactions", scrape_transactions),
                     ("finances", scrape_finances),
                     ("fapreview", scrape_fapreview),
-                    ("eligibility", scrape_eligibility),
-                    ("draft", scrape_draft_sheet)]:
+                    ("eligibility", scrape_eligibility)]:
         try:
             log(f"{key}...")
             data[key] = fn()
@@ -359,12 +536,57 @@ def scrape_all(log=print):
             log(f"  [WARN] {key}: {e}")
             data[key] = [] if key != "eligibility" else {}
 
-    for key in ("rfa", "ufa"):
+    # transactions: official = forum board; fall back to the site page
+    try:
+        log("forum transactions...")
+        data["transactions"] = scrape_forum_transactions()
+        if not data["transactions"]:
+            raise ValueError("empty")
+    except Exception as e:
+        log(f"  [WARN] forum transactions ({e}), using site page")
         try:
-            log(f"{key} sheet...")
-            data[key] = scrape_fa_sheet(key)
+            data["transactions"] = scrape_transactions()
+        except Exception as e2:
+            log(f"  [WARN] transactions: {e2}")
+            data["transactions"] = []
+
+    # FA pools: discover the newest FA thread's sheets; fall back to configured ids
+    try:
+        log("FA thread discovery...")
+        meta, rfa, ufa = discover_fa(log)
+    except Exception as e:
+        log(f"  [WARN] FA discovery: {e}")
+        meta = rfa = ufa = None
+    data["fa_meta"] = meta or {}
+    for key, found in (("rfa", rfa), ("ufa", ufa)):
+        if found:
+            data[key] = found
+            log(f"  {key}: {len(found)} from thread")
+        else:
+            try:
+                data[key] = scrape_fa_sheet(key)
+                log(f"  {key}: {len(data[key])} from configured sheet")
+            except Exception as e:
+                log(f"  [WARN] {key}: {e}")
+                data[key] = []
+
+    # draft board: discover the newest draft thread's grades sheet; fall back
+    try:
+        log("draft thread discovery...")
+        dmeta, dlist = discover_draft(log)
+    except Exception as e:
+        log(f"  [WARN] draft discovery: {e}")
+        dmeta = dlist = None
+    data["draft_meta"] = dmeta or {}
+    if dlist:
+        data["draft"] = dlist
+        log(f"  draft: {len(dlist)} from thread")
+    else:
+        try:
+            data["draft"] = scrape_draft_sheet()
+            log(f"  draft: {len(data['draft'])} from configured sheet")
         except Exception as e:
-            log(f"  [WARN] {key}: {e}")
-            data[key] = []
+            log(f"  [WARN] draft: {e}")
+            data["draft"] = []
 
     return data
