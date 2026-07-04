@@ -388,6 +388,11 @@ def compute_kv(all_players):
 # ────────────────────────────────────────────────────────────
 # Draft pick valuation
 # ────────────────────────────────────────────────────────────
+def pick_curve(slot, rnd, years_out=0):
+    base = 100 * math.exp(-(slot - 1) / 9.0) if rnd == 1 else 32 * math.exp(-(slot - 1) / 12.0)
+    return round(base * 0.93 ** max(0, years_out), 1)
+
+
 def value_picks(data):
     """Attach an estimated slot + 0-100 value to every pick on every team.
 
@@ -416,9 +421,106 @@ def value_picks(data):
                 continue
             year, rnd = int(m.group(1)), int(m.group(2))
             sl = slot.get(pk.get("from") or team, (n + 1) // 2)
-            base = 100 * math.exp(-(sl - 1) / 9.0) if rnd == 1 else 32 * math.exp(-(sl - 1) / 12.0)
             pk.update(year=year, round=rnd, slot=sl,
-                      value=round(base * 0.93 ** max(0, year - season), 1))
+                      value=pick_curve(sl, rnd, year - season))
+
+
+# ────────────────────────────────────────────────────────────
+# Transaction evaluation ("who won the trade")
+# ────────────────────────────────────────────────────────────
+def evaluate_transactions(data, byname):
+    """Parse each trade post ('X receives: a, b, 2014 first round pick'),
+    price every asset (players at KV, picks on the pick curve using the
+    sending team's projected slot) and declare a winner."""
+    order = sorted(data["standings"], key=lambda s: (s["pct"], -s["l"]))
+    slot = {s["team"]: i + 1 for i, s in enumerate(order)}
+    nicks = [s["team"] for s in data["standings"]]
+
+    citymap = {}
+    for f in data.get("finances", []):
+        full = f["team_city"].upper()
+        for nk in nicks:
+            if nk.upper() in full:
+                city = full.replace(nk.upper(), "").strip()
+                if city:
+                    citymap[norm_name(city)] = nk
+                citymap[norm_name(full)] = nk
+                break
+    for nk in nicks:                      # posts sometimes use nicknames
+        citymap.setdefault(norm_name(nk), nk)
+
+    season = data["league"].get("season", 0)
+
+    for tx in data.get("transactions", []):
+        body = tx.pop("body", "")
+        if tx.get("kind") != "trade" or not body:
+            continue
+        # the thread title names both parties cleanly: 'Trade: Memphis and Minnesota'
+        tm = re.match(r"Trade:\s*(.+?)\s+and\s+(.+?)\s*$", tx.get("text", ""))
+        if not tm:
+            continue
+        cities = [tm.group(1).strip(), tm.group(2).strip()]
+        sides = []
+        for i, city in enumerate(cities):
+            other = cities[1 - i]
+            m = re.search(
+                rf"{re.escape(city)}\s+receives:\s*(.*?)"
+                rf"(?=\s*{re.escape(other)}\s+(?:trades|receives):|\s*Deal is official|$)",
+                body, re.I | re.S)
+            if not m:
+                sides = []
+                break
+            items = []
+            for asset in m.group(1).split(","):
+                asset = asset.strip().rstrip(".")
+                if not asset:
+                    continue
+                pm = re.search(r"(\d{4}).*?(first|second|1st|2nd)\s+round", asset, re.I)
+                if pm:
+                    rnd = 1 if pm.group(2).lower() in ("first", "1st") else 2
+                    yr = int(pm.group(1))
+                    items.append({"label": f"{yr} R{rnd}", "val": None,
+                                  "year": yr, "round": rnd})
+                else:
+                    p = byname.get(norm_name(asset))
+                    if p:
+                        items.append({"label": p["name"], "val": p.get("KV")})
+                    elif len(asset) > 2:
+                        items.append({"label": asset, "val": None})
+            sides.append({"team": citymap.get(norm_name(city), city), "items": items})
+        if len(sides) != 2:
+            continue
+        # picks: the sender is the other side — price on their projected slot
+        for i, side in enumerate(sides):
+            sender = sides[1 - i]["team"]
+            for it in side["items"]:
+                if "round" in it:
+                    sl = slot.get(sender, (len(nicks) + 1) // 2)
+                    it["val"] = pick_curve(sl, it["round"], max(0, it["year"] - season))
+                    del it["year"], it["round"]
+            side["total"] = round(sum(it["val"] or 0 for it in side["items"]), 1)
+        a, b = sides
+        if a["total"] != b["total"]:
+            w = a if a["total"] > b["total"] else b
+            tx["eval"] = {"sides": sides, "winner": w["team"],
+                          "margin": round(abs(a["total"] - b["total"]), 1)}
+        else:
+            tx["eval"] = {"sides": sides, "winner": None, "margin": 0}
+
+
+# ────────────────────────────────────────────────────────────
+# FA-results resolution: who is already off the board
+# ────────────────────────────────────────────────────────────
+def mark_fa_resolved(data, fa_list):
+    res = data.get("fa_results")
+    if not res or not res.get("phases"):
+        return
+    blob = norm_name(" ".join(res["phases"]))
+    for p in fa_list:
+        if p.get("fa") in ("UFA", "RFA") and norm_name(p["name"]) in blob:
+            p["res"] = 1
+    data["fa_results"] = {k: res[k] for k in ("year", "url", "title")}
+    data["fa_results"]["n_phases"] = len(res["phases"])
 
 
 def age_trend(age):
@@ -457,15 +559,23 @@ def compute_all(data, log=print):
     league_pace = sum(c["pace"] for c in ctxs) / len(ctxs) if ctxs else 96.0
     league_ptstsa = sum(c["pts_tsa"] for c in ctxs) / len(ctxs) if ctxs else 1.05
 
-    # free agents from sheets + fapreview (dedupe by name, prefer sheets)
+    # free-agent pool: UFA/RFA sheets + the currently-signable Available page.
+    # A player can be on both (went unsigned in FA) — 'avl' flags signability.
     fas = {}
-    for src, tag in (("fapreview", "FA"), ("ufa", "UFA"), ("rfa", "RFA")):
+    for src, tag in (("ufa", "UFA"), ("rfa", "RFA")):
         for p in data.get(src, []):
-            key = p["name"]
-            if key not in fas or tag in ("UFA", "RFA"):
-                q = dict(p)
-                q["fa"] = tag
-                fas[key] = q
+            q = dict(p)
+            q["fa"] = tag
+            fas[norm_name(p["name"])] = q
+    for p in data.get("available", []):
+        key = norm_name(p["name"])
+        if key in fas:
+            fas[key]["avl"] = 1
+        else:
+            q = dict(p)
+            q["fa"] = "AVL"
+            q["avl"] = 1
+            fas[key] = q
     fa_list = list(fas.values())
 
     log("projected metrics (rostered + FAs)...")
@@ -491,4 +601,14 @@ def compute_all(data, log=print):
     data["models"] = {t: {"keys": ks, "beta": [round(b, 5) for b in beta]}
                       for t, (ks, beta) in models.items()}
     value_picks(data)
+    byname = {}
+    for p in everyone:
+        key = norm_name(p["name"])
+        if key not in byname or p.get("team"):
+            byname[key] = p
+    evaluate_transactions(data, byname)
+    mark_fa_resolved(data, fa_list)
+    # raw source lists are folded into fa_pool / transactions — don't ship twice
+    for k in ("ufa", "rfa", "available", "fapreview"):
+        data.pop(k, None)
     return data

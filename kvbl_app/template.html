@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0d1117">
+<meta name="robots" content="noindex, nofollow, noarchive">
 <title>KVBL HQ</title>
 <style>
 :root{
@@ -104,7 +105,8 @@ nav button.on{color:var(--accent)}
 <div id="modal"><div class="sheet" id="modal-body"></div></div>
 
 <script>
-const D = /*__DATA__*/null;
+const D = JSON.parse(new TextDecoder().decode(
+  Uint8Array.from(atob("/*__DATA_B64__*/"), c => c.charCodeAt(0))));
 
 /* ───────── helpers ───────── */
 const $ = (s,el=document)=>el.querySelector(s);
@@ -129,6 +131,8 @@ const kvColor = v => v>=85?"rgba(63,185,80,.25)":v>=65?"rgba(124,92,255,.25)":v>
 const trendIco = t => t==="rising"?'<span class="up">▲▲</span>':t==="improving"?'<span class="up">▲</span>':
                       t==="peak"?'<span class="flat">◆</span>':t==="declining"?'<span class="dn">▼</span>':'<span class="dn">▼▼</span>';
 const teamRec = t => { const s=D.standings.find(x=>x.team===t); return s?`${s.w}-${s.l}`:""; };
+const dcThread = t => { const k=Object.keys(D.dc_threads||{}).find(k=>k.includes(t.toLowerCase()));
+  return k?D.dc_threads[k]:null; };
 
 function playerRow(p, extra=""){
   const s=salary(p);
@@ -215,8 +219,22 @@ function renderHome(){
     h+=`<div class="card"><h3>Injuries</h3>`+D.injuries.slice(0,15).map(i=>
       `<div class="mrow"><span>${esc(i.name)} <span class="badge">${esc(i.team)}</span></span><span class="small">${esc(i.injury)} · ${esc(i.days)}d</span></div>`).join("")+`</div>`;
   }
-  h+=`<div class="card"><h3>Latest official transactions <span class="small">(forum)</span></h3>`+(D.transactions||[]).slice(0,20).map(t=>
-    `<div class="mrow" style="gap:8px">${t.url?`<a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--fg);text-decoration:none;flex:1">${esc(t.text)} <span class="small">↗</span></a>`:`<span style="flex:1">${esc(t.text)}</span>`}<span class="small" style="white-space:nowrap">${esc(t.date)}</span></div>`).join("")+`</div>`;
+  h+=`<div class="card"><h3>Latest official moves <span class="small">(forum · players at KV value, picks on pick curve)</span></h3>`+
+    (D.transactions||[]).slice(0,15).map(t=>{
+    let inner=`<div style="display:flex;gap:8px;align-items:baseline">
+      <a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--fg);text-decoration:none;font-weight:600;flex:1">${esc(t.text)} <span class="small">↗</span></a>
+      <span class="small" style="white-space:nowrap">${esc(t.date)}</span></div>`;
+    if(t.kind==="ext") inner=`<div style="display:flex;gap:8px;align-items:baseline">
+      <span style="flex:1;font-size:.82rem"><span class="badge tag-ufa">EXT</span> ${esc(t.text)}</span>
+      <span class="small" style="white-space:nowrap">${esc(t.date)}</span></div>`;
+    if(t.eval&&t.eval.sides){
+      inner+=t.eval.sides.map(s=>`<div class="small" style="margin-top:2px">→ <b>${esc(s.team)}</b> get ${
+        s.items.map(i=>`${esc(i.label)}${i.val!=null?` <span style="color:var(--gold)">${Math.round(i.val)}</span>`:""}`).join(", ")||"nothing"}
+        <b style="float:right">${s.total.toFixed(0)}</b></div>`).join("");
+      inner+=`<div class="small" style="margin-top:2px">${t.eval.winner?
+        `🏆 <b class="ok">${esc(t.eval.winner)}</b> win the value swap by <b>${t.eval.margin.toFixed(0)}</b>`:"dead even"}</div>`;
+    }
+    return `<div style="padding:7px 0;border-bottom:1px solid var(--line)">${inner}</div>`;}).join("")+`</div>`;
   h+=`<div class="note">League pace ${D.league.pace} poss/48 · BPM: 0 = league avg, +2 good starter, +4 all-star, +6 all-league · PER avg 15</div>`;
   $("#pg-home").innerHTML=h;
 }
@@ -254,9 +272,13 @@ function renderTeams(){
   const names=Object.keys(D.teams).sort();
   const td=D.teams[curTeam]||{players:[],contracts:[],picks:[]};
   const years=[0,1,2,3,4,5].map(y=>td.players.reduce((a,p)=>a+((p.contract||[])[y]||0),0));
+  const dcUrl=dcThread(curTeam);
   let h=`<h2>Teams</h2><div style="padding:0 12px"><select id="tsel" style="width:100%">${
     names.map(n=>`<option${n===curTeam?" selected":""}>${n}</option>`).join("")}</select></div>
   <div class="card"><h3>${esc(curTeam)} — ${teamRec(curTeam)} ${td.ctx?`· Net ${fmt1(td.ctx.net)} · O ${td.ctx.ortg} · D ${td.ctx.drtg} · pace ${td.ctx.pace}`:""}</h3>
+    <div class="small" style="margin:4px 0 6px">
+      <a href="https://www.kvbl.net/${esc(curTeam.replace(/ /g,""))}.htm" target="_blank" rel="noopener" style="color:var(--accent)">kvbl.net page ↗</a>
+      ${dcUrl?` · <a href="${esc(dcUrl)}" target="_blank" rel="noopener" style="color:var(--accent)">depth chart thread ↗</a>`:""}</div>
     <h3 style="margin-top:8px">Payroll by year (cap $${CAP}M, hard $${HARD}M)</h3>`;
   years.forEach((v,i)=>{ if(v>0.01||i<3) h+=`<div class="mrow"><span>Year ${i+1}</span>
     <span><b class="${v>HARD?"err":v>CAP?"flat":""}">${money(v)}</b> <span class="small">(${v>CAP?"−":"+"}${Math.abs(CAP-v).toFixed(1)} vs cap)</span></span></div>`;});
@@ -306,8 +328,10 @@ function tStats(team,names,pickIdx){
     bpm:ps.reduce((a,p)=>a+(p.sBPM??p.pBPM??0),0),
     pbpm:ps.reduce((a,p)=>a+(p.pBPM??0),0),
     kv:ps.length?ps.reduce((a,p)=>a+(p.KV||0),0)/ps.length:0,
+    kvsum:ps.reduce((a,p)=>a+(p.KV||0),0),
     pv:pks.reduce((a,pk)=>a+(pk.value||0),0), ps, pks};
 }
+window.tClear=()=>{T.pa=[];T.pb=[];T.ka=[];T.kb=[];tSave();};
 function renderTrade(){
   const names=Object.keys(D.teams).sort();
   if(!T.b) T.b=names.find(n=>n!==T.a)||"";
@@ -324,18 +348,25 @@ function renderTrade(){
       <div class="small" style="margin:4px 0 2px">sends:</div>${tside(T.b,"pb")}</div>
   </div></div>`;
   if(A.n||B.n||A.pks.length||B.pks.length){
-    const dB=(B.bpm-A.bpm), dP=(B.pbpm-A.pbpm), dV=(B.pv-A.pv);
-    h+=`<div class="card"><h3>Verdict for ${esc(T.a)}</h3>
-    <div class="mrow"><span>BPM in − out</span><b class="${dB>0?"ok":dB<0?"err":""}">${fmt1(dB)}</b></div>
-    <div class="mrow"><span>proj BPM in − out</span><b class="${dP>0?"ok":dP<0?"err":""}">${fmt1(dP)}</b></div>
-    <div class="mrow"><span>Pick value in − out <span class="small">(0-100 scale)</span></span><b class="${dV>0?"ok":dV<0?"err":""}">${fmt1(dV)}</b></div>
-    <div class="mrow"><span>Salary Y1: out ${money(A.sal)} / in ${money(B.sal)}</span><b>${fmt1(B.sal-A.sal).replace("+","+$")}M</b></div>
-    <div class="mrow"><span>Avg KV: out ${A.kv.toFixed(0)} / in ${B.kv.toFixed(0)}</span></div>
+    // what each side RECEIVES: total value = incoming players' KV + incoming pick values
+    const inA=B.kvsum+B.pv, inB=A.kvsum+A.pv, margin=Math.abs(inA-inB);
+    const winner=margin<1?null:(inA>inB?T.a:T.b);
+    const recv=(me,st)=>`<div style="margin:4px 0"><b>${esc(me)} receive</b> <b style="float:right">${(st.kvsum+st.pv).toFixed(0)} value</b>
+      <div class="small">${[...st.ps.map(p=>`${esc(p.name)} <span style="color:var(--gold)">${Math.round(p.KV||0)}</span>`),
+        ...st.pks.map(pk=>`${pk.year}-${String(pk.year+1).slice(2)} R${pk.round} <span style="color:var(--gold)">${Math.round(pk.value)}</span>`)].join(" · ")||"nothing"}</div>
+      <div class="small">talent impact: BPM ${fmt1(st.bpm)} now · ${fmt1(st.pbpm)} projected · salary ${money(st.sal)}</div></div>`;
+    h+=`<div class="card"><h3>Who wins the trade?</h3>
+    ${recv(T.a,B)}${recv(T.b,A)}
+    <div style="text-align:center;padding:6px;background:var(--panel2);border-radius:8px;margin:6px 0">
+      ${winner?`🏆 <b class="ok">${esc(winner)}</b> win — <b>+${margin.toFixed(0)}</b> more total value received`:"⚖️ Dead even on total value"}</div>
+    <div class="small">Value = player KV ratings + pick values, both on the same 0-100 scale. BPM lines show on-court impact gained per team.</div>
     <h3 style="margin-top:8px">Cap check</h3>
     <div class="mrow"><span>${esc(T.a)} payroll after</span><b class="${newA>HARD?"err":newA>CAP?"flat":"ok"}">${money(newA)}${newA>HARD?" — OVER HARD CAP":newA>CAP?" (over cap)":""}</b></div>
     <div class="mrow"><span>${esc(T.b)} payroll after</span><b class="${newB>HARD?"err":newB>CAP?"flat":"ok"}">${money(newB)}${newB>HARD?" — OVER HARD CAP":newB>CAP?" (over cap)":""}</b></div>
     <div class="mrow"><span>Roster sizes after</span><span>${esc(T.a)}: ${cntA} · ${esc(T.b)}: ${cntB}</span></div>
-    <button class="primary" style="margin-top:8px;width:100%" onclick="copyTrade()">📋 Copy trade post</button></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="primary" style="flex:1" onclick="copyTrade()">📋 Copy trade post</button>
+      <button onclick="tClear()">✕ Clear</button></div></div>
     <div class="note">Rules: min-contract-only trades in-season need a player or R2 back · over-hard-cap after deadline = lose Bird rights + next R1</div>`;
   }
   $("#pg-trade").innerHTML=h;
@@ -351,35 +382,44 @@ window.copyTrade=()=>{
 };
 
 /* ───────── FREE AGENCY ───────── */
-const F = {tab:"UFA", q:"", pos:"ALL", sort:"KV"};
+const F = {tab:"Avail", q:"", pos:"ALL", sort:"KV"};
 const stars = new Set(LS.get("stars",[]));
 window.toggleStar=n=>{stars.has(n)?stars.delete(n):stars.add(n);LS.set("stars",[...stars]);renderFA();};
 function renderFA(){
   const payroll=D.teams[MY]?D.teams[MY].players.reduce((a,p)=>a+(salary(p)||0),0):0;
   const room=CAP-payroll;
-  const fm=D.fa_meta||{};
+  const fm=D.fa_meta||{}, fr=D.fa_results;
   let h=`<h2>💰 Free agency</h2>`;
-  if(fm.title) h+=`<div class="note">Pools auto-loaded from <a href="${esc(fm.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(fm.title)}</a>${fm.complete?" — this FA period is <b>complete</b>, so check “Next class” for who's coming up":""}</div>`;
+  if(fm.title) h+=`<div class="note">Pools: <a href="${esc(fm.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(fm.title)}</a>${
+    fr?` · Results: <a href="${esc(fr.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(fr.title)} ↗</a> (${fr.n_phases} phase posts — players already off the board are dimmed ✓)`:""}${
+    fm.complete?" · FA is <b>complete</b> — “Avail” is who you can sign now, “Up next” is the coming class":""}</div>`;
   h+=`<div class="card"><div class="mrow"><span>${esc(MY)} payroll</span><b>${money(payroll)}</b></div>
     <div class="mrow"><span>Cap room</span><b class="${room>0?"ok":"err"}">${money(room)}</b></div>
     <div class="small">${room<=0?"Over cap → MLE ($5.00M) and vet-min offers only":"Room offers up to "+money(room)+" year 1"} · raises ≤7.5%/yr, not compounded · RFA offers min 2 years</div>
     <button class="primary" style="margin-top:6px;width:100%" onclick="offerBuilder()">✍️ Offer builder</button></div>
-  <div class="chips">${["UFA","RFA","Next class","⭐"].map(x=>
+  <div class="chips">${["Avail","Up next","+2 yrs","UFA","RFA","⭐"].map(x=>
     `<button class="${F.tab===x?"on":""}" onclick="F.tab='${x}';renderFA()">${x}</button>`).join("")}</div>
   <div class="searchbar"><input id="fq" placeholder="Search…" value="${esc(F.q)}">
     <select id="fsort">${["KV","pBPM","pOBPM","pDBPM","pPER","Age"].map(k=>`<option${k===F.sort?" selected":""}>${k}</option>`).join("")}</select></div>
   <div class="chips">${["ALL","PG","SG","SF","PF","C"].map(x=>
     `<button class="${F.pos===x?"on":""}" onclick="F.pos='${x}';renderFA()">${x}</button>`).join("")}</div>`;
   let list = F.tab==="⭐" ? FA.concat(ALL).filter(p=>stars.has(p.name))
-    : FA.filter(p=>F.tab==="UFA"?p.fa==="UFA":F.tab==="RFA"?p.fa==="RFA":p.fa==="FA");
+    : F.tab==="Avail" ? FA.filter(p=>p.avl)
+    : F.tab==="Up next" ? ALL.filter(p=>(p.contract||[]).length===1)
+    : F.tab==="+2 yrs" ? ALL.filter(p=>(p.contract||[]).length===2)
+    : FA.filter(p=>p.fa===F.tab);
   if(F.pos!=="ALL") list=list.filter(p=>elig(p).includes(F.pos));
   if(F.q) list=list.filter(p=>p.name.toLowerCase().includes(F.q.toLowerCase()));
   const key=F.sort==="Age"?(p=>-p.age):(p=>p[F.sort]??-99);
   list.sort((a,b)=>key(b)-key(a));
-  h+=list.slice(0,120).map(p=>`<div style="display:flex;align-items:center">
-    <div style="flex:1">${playerRow(p, p.yrs!=null?` · ${p.yrs} yrs svc`:"")}</div>
+  h+=list.slice(0,120).map(p=>`<div style="display:flex;align-items:center${p.res?";opacity:.45":""}">
+    <div style="flex:1">${playerRow(p, (p.yrs!=null?` · ${p.yrs} yrs svc`:"")+(p.res?" · ✓ off board":""))}</div>
     <div class="star ${stars.has(p.name)?"on":""}" style="padding:0 12px" onclick="toggleStar('${esc(p.name).replace(/'/g,"\\'")}')">★</div></div>`).join("");
-  h+=`<div class="note">${list.length} players · p-metrics are projected from ratings (no team context). "Next class" = current fapreview page.</div>`;
+  const notes={Avail:"unsigned players you can sign right now (kvbl.net/Available)",
+    "Up next":"rostered players on the LAST year of their contract — next summer's FA class",
+    "+2 yrs":"two years left — the FA class after next",
+    UFA:"unrestricted pool from the FA thread",RFA:"restricted pool from the FA thread","⭐":"your shortlist"};
+  h+=`<div class="note">${list.length} players · ${notes[F.tab]||""} · p-metrics projected from ratings</div>`;
   $("#pg-fa").innerHTML=h;
   $("#fq").addEventListener("input",e=>{F.q=e.target.value;renderFA();const el=$("#fq");el.focus();el.setSelectionRange(el.value.length,el.value.length)});
   $("#fsort").addEventListener("change",e=>{F.sort=e.target.value;renderFA()});
@@ -446,20 +486,27 @@ function renderDraft(){
 window.dSet=(name,k,v)=>{dnotes[name]=dnotes[name]||{};dnotes[name][k]=k==="rank"?(+v||null):v;LS.set("dnotes",dnotes);if(k==="rank")renderDraft();};
 
 /* ───────── DEPTH CHART ───────── */
-const DC = LS.get("depth",{slots:{PG:[],SG:[],SF:[],PF:[],C:[]},set:{}});
+const DC = LS.get("depth",{slots:{PG:[],SG:[],SF:[],PF:[],C:[]},set:{},ir:{}});
+if(!DC.ir) DC.ir={};
 function lastName(n){return n.trim().split(/\s+/).pop();}
 function renderDepth(){
   const roster=(D.teams[MY]?D.teams[MY].players:[]).slice().sort((a,b)=>(b.KV||0)-(a.KV||0));
-  const used=new Set(Object.values(DC.slots).flat());
-  let h=`<h2>📋 Depth chart <span class="small">(${esc(MY)})</span></h2>
-  <div class="card"><h3>Assign positions (tap to cycle through eligible)</h3>`;
+  const dcUrl=dcThread(MY);
+  let h=`<h2>📋 Depth chart <span class="small">(${esc(MY)})</span>
+    ${dcUrl?`<a href="${esc(dcUrl)}" target="_blank" rel="noopener" class="small" style="color:var(--accent);margin-left:auto">post it here ↗</a>`:""}</h2>
+  <div class="card"><h3>Roster — active?</h3>
+    <div class="small" style="margin-bottom:4px">"No" sends a player to the IR line and pulls him from the lineup</div>
+    ${roster.map(p=>`<span class="pick-pill" style="${DC.ir[p.name]?"opacity:.5;border-color:var(--bad)":""}"
+      onclick="dcActive('${esc(p.name).replace(/'/g,"\\'")}')">${esc(lastName(p.name))}
+      <b style="color:${DC.ir[p.name]?"var(--bad)":"var(--good)"}">${DC.ir[p.name]?"IR":"✓"}</b></span>`).join("")}</div>
+  <div class="card"><h3>Assign positions</h3>`;
   for(const pos of ["PG","SG","SF","PF","C"]){
     h+=`<div class="dc-line"><b style="width:2.4em">${pos}</b>`;
     for(const n of DC.slots[pos]) h+=`<span class="pick-pill">${esc(lastName(n))}<b onclick="dcRemove('${pos}','${esc(n).replace(/'/g,"\\'")}')">✕</b></span>`;
     h+=`<select onchange="dcAdd('${pos}',this.value)"><option value="">+ add</option>${
-      roster.filter(p=>elig(p).includes(pos)&&!DC.slots[pos].includes(p.name))
+      roster.filter(p=>!DC.ir[p.name]&&elig(p).includes(pos)&&!DC.slots[pos].includes(p.name))
         .map(p=>`<option>${esc(p.name)}</option>`).join("")}
-      <optgroup label="any position">${roster.filter(p=>!DC.slots[pos].includes(p.name)).map(p=>`<option>${esc(p.name)}</option>`).join("")}</optgroup></select></div>`;
+      <optgroup label="any position">${roster.filter(p=>!DC.ir[p.name]&&!DC.slots[pos].includes(p.name)).map(p=>`<option>${esc(p.name)}</option>`).join("")}</optgroup></select></div>`;
   }
   h+=`</div><div class="card"><h3>Player settings</h3>
   <div class="small" style="margin-bottom:4px">minutes / off style (o·d·p) / def style / <b>off focus</b> / <b>def focus</b> / <b>ball-handling focus</b></div>`;
@@ -474,26 +521,37 @@ function renderDepth(){
     </div>`;
   }
   /* validation */
+  const irNames=roster.map(p=>p.name).filter(n=>DC.ir[n]);
+  const benched=roster.map(p=>p.name).filter(n=>!DC.ir[n]&&!activeNames.includes(n));
   const totalMin=activeNames.reduce((a,n)=>a+(DC.set[n]?.min||0),0);
   const checks=[
     [activeNames.length>=10,`${activeNames.length}/10+ active players`],
     [totalMin===240,`total minutes ${totalMin}/240`],
     ...["PG","SG","SF","PF","C"].map(pos=>[DC.slots[pos].length>=2,`${pos}: ${DC.slots[pos].length}/2+`]),
     [activeNames.every(n=>(DC.set[n]?.min||0)<=40),"max 40 min each"],
+    [benched.length===0,benched.length?`unplaced & not IR: ${benched.map(lastName).join(", ")}`:"everyone placed or IR"],
   ];
   h+=`</div><div class="card"><h3>Checks</h3>${checks.map(([ok,t])=>
     `<div class="mrow"><span>${t}</span><b class="${ok?"ok":"err"}">${ok?"✓":"✗"}</b></div>`).join("")}</div>`;
   /* output */
   const out=["PG","SG","SF","PF","C"].map(pos=>`${pos}: ${DC.slots[pos].map(lastName).join(", ")}`).join("\n")
     +"\n\n"+activeNames.map(n=>{const s=DC.set[n];return `${lastName(n)}: ${s.min}/${s.off}/${s.def}/${s.s1}/${s.s2}/${s.s3}`}).join("\n")
-    +"\n\nIR: the rest";
+    +"\n\nIR: "+(irNames.length?irNames.map(lastName).join(", "):"the rest");
   h+=`<div class="card"><h3>Forum post</h3><textarea id="dc-out" readonly>${esc(out)}</textarea>
-    <button class="primary" style="width:100%;margin-top:6px" onclick="copyText($('#dc-out').value)">📋 Copy depth chart</button></div>`;
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="primary" style="flex:1" onclick="copyText($('#dc-out').value)">📋 Copy depth chart</button>
+      <button onclick="dcClear()">✕ Clear</button></div></div>`;
   $("#pg-depth").innerHTML=h;
 }
 window.dcAdd=(pos,n)=>{if(n){DC.slots[pos].push(n);LS.set("depth",DC);renderDepth();}};
 window.dcRemove=(pos,n)=>{DC.slots[pos]=DC.slots[pos].filter(x=>x!==n);LS.set("depth",DC);renderDepth();};
 window.dcSet=(n,k,v)=>{DC.set[n]=DC.set[n]||{};DC.set[n][k]=v;LS.set("depth",DC);renderDepth();};
+window.dcActive=n=>{
+  if(DC.ir[n]) delete DC.ir[n];
+  else{DC.ir[n]=1;for(const pos in DC.slots)DC.slots[pos]=DC.slots[pos].filter(x=>x!==n);delete DC.set[n];}
+  LS.set("depth",DC);renderDepth();};
+window.dcClear=()=>{if(!confirm("Clear the entire depth chart? This wipes positions, minutes and IR flags."))return;
+  DC.slots={PG:[],SG:[],SF:[],PF:[],C:[]};DC.set={};DC.ir={};LS.set("depth",DC);renderDepth();};
 
 /* ───────── shared ───────── */
 window.copyText=t=>{navigator.clipboard.writeText(t).then(()=>{

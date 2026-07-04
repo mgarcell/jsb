@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+kvbl_app/.cache.json
 out.txt
 check_out.txt
 _b64_1.txt

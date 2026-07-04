@@ -303,33 +303,132 @@ def scrape_fapreview():
 # ────────────────────────────────────────────────────────────
 # Forum (ProBoards)
 # ────────────────────────────────────────────────────────────
-def forum_threads(board_path):
+def forum_threads(board_path, pages=1):
     """Thread list for a board, in page order (newest activity first).
     Returns [{url, title, date}] — date is the nearest timestamp after the
     link in the HTML (the row's last-post time), best-effort."""
-    page = fetch(FORUM + board_path)
     out, seen = [], set()
-    for m in re.finditer(r'href="(/thread/(\d+)/[^"]*)"[^>]*>(.*?)</a>', page):
-        href, tid, title = m.group(1), m.group(2), strip_tags(m.group(3))
-        if tid in seen or not title:
-            continue
-        seen.add(tid)
-        tail = page[m.end():m.end() + 3000]
-        dm = re.search(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w* \d+, \d{4})', tail)
-        out.append({"url": FORUM + href, "title": title,
-                    "date": dm.group(1) if dm else ""})
+    for pg in range(1, pages + 1):
+        try:
+            page = fetch(FORUM + board_path + (f"?page={pg}" if pg > 1 else ""))
+        except Exception:
+            break
+        before = len(out)
+        for m in re.finditer(r'href="(/thread/(\d+)/[^"]*)"[^>]*>(.*?)</a>', page):
+            href, tid, title = m.group(1), m.group(2), strip_tags(m.group(3))
+            if tid in seen or not title:
+                continue
+            seen.add(tid)
+            tail = page[m.end():m.end() + 3000]
+            dm = re.search(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w* \d+, \d{4})', tail)
+            out.append({"url": FORUM + href, "title": title,
+                        "date": dm.group(1) if dm else ""})
+        if len(out) == before:      # past the last page
+            break
     return out
 
 
-def scrape_forum_transactions(limit=30):
-    """Official transactions = threads on the KVBL Transactions board."""
+def thread_posts(thread_url):
+    """Post bodies (tag-stripped text) of a thread's first page, with a
+    best-effort timestamp for each."""
+    page = fetch(thread_url)
+    out = []
+    for m in re.finditer(r'<div[^>]*class="[^"]*message[^"]*"[^>]*>(.*?)</div>', page, re.S):
+        body = re.sub(r"\s+", " ", strip_tags(m.group(1))).strip()
+        if not body:
+            continue
+        head = page[max(0, m.start() - 4000):m.start()]
+        dm = re.findall(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w* \d+, \d{4})', head)
+        out.append({"date": dm[-1] if dm else "", "text": body})
+    return out
+
+
+def scrape_forum_transactions(limit=15):
+    """Official transactions = threads on the KVBL Transactions board.
+    Each trade thread's first post carries the asset lists ('X receives: …'),
+    kept raw here and evaluated after metrics are computed."""
     out = []
     for t in forum_threads("/board/8/kvbl-transactions"):
         if t["title"].lower() in ("extensions",):     # pinned reference thread
             continue
-        out.append({"date": t["date"], "text": t["title"], "url": t["url"]})
+        item = {"date": t["date"], "text": t["title"], "url": t["url"], "kind": "trade"}
+        try:
+            posts = thread_posts(t["url"])
+            if posts:
+                item["body"] = posts[0]["text"][:1500]
+        except Exception:
+            pass
+        out.append(item)
         if len(out) >= limit:
             break
+    return out
+
+
+MONTHS = {m: i + 1 for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])}
+
+
+def date_key(d):
+    m = re.match(r"([A-Za-z]{3})\w* (\d+), (\d{4})", d or "")
+    return (int(m.group(3)), MONTHS.get(m.group(1), 0), int(m.group(2))) if m else (0, 0, 0)
+
+
+def merge_by_date(a, b, limit=15):
+    return sorted(a + b, key=lambda t: date_key(t.get("date")), reverse=True)[:limit]
+
+
+def scrape_extensions(limit=8):
+    """Latest posts in the pinned Extensions thread."""
+    posts = thread_posts(FORUM + "/thread/3328/extensions")
+    out = [{"date": p["date"], "text": p["text"][:300], "kind": "ext",
+            "url": FORUM + "/thread/3328/extensions"}
+           for p in posts if len(p["text"]) > 20]
+    return out[-limit:][::-1]
+
+
+def scrape_fa_results(year):
+    """The board-12 results thread for a given FA year.  Returns meta + the
+    full text of every phase post (RFA offers, RFA matching, UFA bid 1/2)."""
+    hit = None
+    for t in forum_threads("/board/12/kvbl-free-agency-results"):
+        m = re.search(r"(\d{4})", t["title"])
+        if m and int(m.group(1)) == year:
+            hit = t
+            break
+    if not hit:
+        return None
+    phases = [p["text"] for p in thread_posts(hit["url"])]
+    return {"year": year, "url": hit["url"], "title": hit["title"], "phases": phases}
+
+
+def scrape_dc_threads():
+    """Depth-chart board: map team nickname -> that team's DC thread url.
+    Thread titles are freeform ('Nuggets DC', 'OKC Thunder Depth Chart'), so
+    the lookup key includes both title and url slug; the board spans pages."""
+    out = {}
+    for t in forum_threads("/board/10/kvbl-depth-charts", pages=3):
+        out[(t["title"] + " " + t["url"].rsplit("/", 1)[-1]).lower()] = t["url"]
+    return out
+
+
+def scrape_available():
+    """kvbl.net/Available.htm — unsigned players who can be signed right now.
+    Same ratings-table format as the FA preview page."""
+    rows = page_rows(fetch(BASE + "Available.htm"))
+    header, out = {}, []
+    for r in rows:
+        low = [c.strip().lower() for c in r]
+        if "player" in low and "2ga" in low:
+            header = {c: i for i, c in enumerate(low)}
+            continue
+        if header and len(r) > header["player"]:
+            name = r[header["player"]].strip()
+            pos = r[header.get("po", 0)].strip().upper()
+            if not name or pos not in ("PG", "SG", "SF", "PF", "C", "G", "F"):
+                continue
+            out.append({"name": name, "pos": pos,
+                        "age": int(num(r[header.get("age", 2)])),
+                        "r": {c: int(num(r[header[c]])) for c in RATING_COLS if c in header}})
     return out
 
 
@@ -549,6 +648,20 @@ def scrape_all(log=print):
         except Exception as e2:
             log(f"  [WARN] transactions: {e2}")
             data["transactions"] = []
+    try:
+        log("extensions...")
+        data["transactions"] = merge_by_date(data["transactions"], scrape_extensions())
+    except Exception as e:
+        log(f"  [WARN] extensions: {e}")
+
+    for key, fn in [("available", scrape_available),
+                    ("dc_threads", scrape_dc_threads)]:
+        try:
+            log(f"{key}...")
+            data[key] = fn()
+        except Exception as e:
+            log(f"  [WARN] {key}: {e}")
+            data[key] = [] if key == "available" else {}
 
     # FA pools: discover the newest FA thread's sheets; fall back to configured ids
     try:
@@ -569,6 +682,15 @@ def scrape_all(log=print):
             except Exception as e:
                 log(f"  [WARN] {key}: {e}")
                 data[key] = []
+
+    # FA results thread (board 12): phase posts for the current FA year
+    data["fa_results"] = None
+    if meta and meta.get("year"):
+        try:
+            log("FA results thread...")
+            data["fa_results"] = scrape_fa_results(meta["year"])
+        except Exception as e:
+            log(f"  [WARN] fa results: {e}")
 
     # draft board: discover the newest draft thread's grades sheet; fall back
     try:

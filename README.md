@@ -1,6 +1,6 @@
-# KVBL HQ
+# League HQ
 
-A phone-first command center for the KVBL sim league (kvbl.net). One static page,
+A phone-first command center for a private basketball sim league. One static page,
 rebuilt automatically from live league data — free to host on GitHub Pages.
 
 ## What it does
@@ -31,21 +31,21 @@ rebuilt automatically from live league data — free to host on GitHub Pages.
 
 ## Data sources (all fetched at build time)
 
-- kvbl.net: Standings, all team pages (ratings / stats / contracts / picks / team totals),
+- the league site: Standings, all team pages (ratings / stats / contracts / picks / team totals),
   Injuries, Transactions, Finances, FA preview
 - Google Sheets: position eligibility, draft grades, RFA list, UFA list
 
 ## Deploy (free, ~5 minutes)
 
-1. Create a GitHub account if needed, then a **public** repo (e.g. `kvbl`).
+1. Create a GitHub account if needed, then a **public** repo (any name).
 2. Push this folder to it.
 3. Repo **Settings → Pages** → Source: *Deploy from a branch* → Branch: `main`, folder `/docs` → Save.
 4. Repo **Settings → Actions → General** → Workflow permissions → *Read and write permissions* → Save.
 5. Your app is at `https://<username>.github.io/<repo>/` — open it on your phone
    and "Add to Home Screen".
 
-The **Rebuild KVBL app** workflow refreshes data every 6 hours. To refresh on
-demand from your phone: repo → Actions → Rebuild KVBL app → Run workflow.
+The **Rebuild the league app** workflow refreshes data every 6 hours. To refresh on
+demand from your phone: repo → Actions → Rebuild the league app → Run workflow.
 
 ## Run locally
 
