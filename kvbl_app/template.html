@@ -175,7 +175,7 @@ window.showPlayer = function(name){
   <div class="card" style="margin:8px 0"><h3>KV rating</h3>
     <div class="bar"><i style="width:${p.KV||0}%"></i></div>
     <div class="small"><b>${p.KV!=null?p.KV.toFixed(0):"–"}</b>/100 league percentile — 70% BPM + 30% PER, stats & projection blended by minutes</div>
-    ${p.TV!=null?`<div class="mrow" style="margin-top:6px"><span>Trade value <span class="small">(above-replacement prod. × age/contract + salary surplus)</span></span><b class="${p.TV<0?"err":""}">${p.TV.toFixed(1)}</b></div>`:""}</div>`;
+    ${p.TV!=null?`<div class="mrow" style="margin-top:6px"><span>Trade value <span class="small">(KV³ curve × age/contract ± salary surplus)</span></span><b class="${p.TV<0?"err":""}">${p.TV.toFixed(1)}</b></div>`:""}</div>`;
   if(s && s.min>0) h+=`<div class="card" style="margin:8px 0"><h3>Season (${s.g} g, ${s.min.toFixed(1)} mpg)</h3>
     <div class="statline"><span><b>${s.ppg.toFixed(1)}</b> pts</span><span><b>${s.reb.toFixed(1)}</b> reb</span>
     <span><b>${s.ast.toFixed(1)}</b> ast</span><span><b>${s.stl.toFixed(1)}</b> stl</span><span><b>${s.blk.toFixed(1)}</b> blk</span>
@@ -360,7 +360,7 @@ function renderTrade(){
     ${recv(T.a,B)}${recv(T.b,A)}
     <div style="text-align:center;padding:6px;background:var(--panel2);border-radius:8px;margin:6px 0">
       ${winner?`🏆 <b class="ok">${esc(winner)}</b> win — <b>+${margin.toFixed(0)}</b> more Trade Value received`:"⚖️ Dead even on Trade Value"}</div>
-    <div class="small">TV = production above replacement (superlinear — stars are scarce, scrubs ≈ 0), × age & contract-years, + salary surplus. Overpaid non-contributors go <b class="err">negative</b>. Picks are on the same scale (#1 overall ≈ 30).</div>
+    <div class="small">TV = (KV)³ curve — one 90 always beats two 50s (73 vs 25) — × age & years of control, ± contract surplus. Overpaid non-contributors go <b class="err">negative</b>. Picks share the scale (#1 overall ≈ 40).</div>
     <h3 style="margin-top:8px">Cap check</h3>
     <div class="mrow"><span>${esc(T.a)} payroll after</span><b class="${newA>HARD?"err":newA>CAP?"flat":"ok"}">${money(newA)}${newA>HARD?" — OVER HARD CAP":newA>CAP?" (over cap)":""}</b></div>
     <div class="mrow"><span>${esc(T.b)} payroll after</span><b class="${newB>HARD?"err":newB>CAP?"flat":"ok"}">${money(newB)}${newB>HARD?" — OVER HARD CAP":newB>CAP?" (over cap)":""}</b></div>

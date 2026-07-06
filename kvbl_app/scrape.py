@@ -14,11 +14,34 @@ in the same table, so shooting counts get divided by games played.
 import csv
 import html as htmlmod
 import io
+import json
+import os
 import re
 import subprocess
 import time
 import unicodedata
 import urllib.request
+
+# last-good forum data, committed to the repo: GitHub Actions runners are
+# sometimes served the forum's bot challenge, local builds rarely are —
+# whenever a forum scrape fails, the previous successful result is used
+FCACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "forum_cache.json")
+
+
+def load_fcache():
+    try:
+        with open(FCACHE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_fcache(fc):
+    try:
+        with open(FCACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(fc, f, separators=(",", ":"))
+    except Exception:
+        pass
 
 BASE = "https://www.kvbl.net/"
 FORUM = "https://kvbl.boards.net"
@@ -67,17 +90,39 @@ def fetch(url, tries=3):
     raise last
 
 
+try:                       # browser-TLS impersonation; needed on CI runners
+    from curl_cffi import requests as cffi_requests
+except ImportError:
+    cffi_requests = None
+
+
+def is_challenge(body):
+    return "POW_CHALLENGE" in body or "challenge_nonce" in body
+
+
 def fetch_curl(url, tries=3):
+    """boards.net fetch: curl_cffi (Chrome TLS fingerprint) when installed,
+    else the curl binary.  The proof-of-work challenge page counts as a
+    failure so callers can fall back to cached forum data."""
     last = None
     for attempt in range(tries):
         try:
-            out = subprocess.run(
-                ["curl", "-sL", "--max-time", "30", url],
-                capture_output=True, timeout=45)
-            body = out.stdout.decode("utf-8", errors="replace")
-            if out.returncode == 0 and body:
+            if cffi_requests is not None:
+                r = cffi_requests.get(url, impersonate="chrome", timeout=30)
+                body = r.text
+            else:
+                # NOTE: no browser -A header — the forum challenges when the UA
+                # claims a browser but the TLS handshake isn't one.  curl's
+                # default identity passes; curl_cffi impersonates both at once.
+                out = subprocess.run(
+                    ["curl", "-sL", "--max-time", "30", url],
+                    capture_output=True, timeout=45)
+                if out.returncode != 0:
+                    raise RuntimeError(f"curl rc={out.returncode}")
+                body = out.stdout.decode("utf-8", errors="replace")
+            if body and not is_challenge(body):
                 return body
-            last = RuntimeError(f"curl rc={out.returncode}")
+            last = RuntimeError("forum served bot challenge")
         except Exception as e:
             last = e
         time.sleep(1.5 * (attempt + 1))
@@ -635,46 +680,61 @@ def scrape_all(log=print):
             log(f"  [WARN] {key}: {e}")
             data[key] = [] if key != "eligibility" else {}
 
-    # transactions: official = forum board; fall back to the site page
+    fc = load_fcache()
+
+    # transactions: forum board (cached), then extensions, then site-page fallback
     try:
         log("forum transactions...")
-        data["transactions"] = scrape_forum_transactions()
-        if not data["transactions"]:
+        tx = scrape_forum_transactions()
+        if not tx:
             raise ValueError("empty")
-    except Exception as e:
-        log(f"  [WARN] forum transactions ({e}), using site page")
         try:
-            data["transactions"] = scrape_transactions()
-        except Exception as e2:
-            log(f"  [WARN] transactions: {e2}")
-            data["transactions"] = []
-    try:
-        log("extensions...")
-        data["transactions"] = merge_by_date(data["transactions"], scrape_extensions())
-    except Exception as e:
-        log(f"  [WARN] extensions: {e}")
-
-    for key, fn in [("available", scrape_available),
-                    ("dc_threads", scrape_dc_threads)]:
-        try:
-            log(f"{key}...")
-            data[key] = fn()
+            tx = merge_by_date(tx, scrape_extensions())
         except Exception as e:
-            log(f"  [WARN] {key}: {e}")
-            data[key] = [] if key == "available" else {}
+            log(f"  [WARN] extensions: {e}")
+        data["transactions"] = fc["transactions"] = tx
+    except Exception as e:
+        log(f"  [WARN] forum transactions ({e}), using {'cache' if fc.get('transactions') else 'site page'}")
+        if fc.get("transactions"):
+            data["transactions"] = fc["transactions"]
+        else:
+            try:
+                data["transactions"] = scrape_transactions()
+            except Exception as e2:
+                log(f"  [WARN] transactions: {e2}")
+                data["transactions"] = []
 
-    # FA pools: discover the newest FA thread's sheets; fall back to configured ids
+    try:
+        log("available...")
+        data["available"] = scrape_available()
+    except Exception as e:
+        log(f"  [WARN] available: {e}")
+        data["available"] = []
+
+    try:
+        log("dc threads...")
+        data["dc_threads"] = fc["dc_threads"] = scrape_dc_threads() or fc.get("dc_threads", {})
+    except Exception as e:
+        log(f"  [WARN] dc threads ({e}), using cache")
+        data["dc_threads"] = fc.get("dc_threads", {})
+
+    # FA pools: discover the newest FA thread's sheets; cache; configured ids last
     try:
         log("FA thread discovery...")
         meta, rfa, ufa = discover_fa(log)
     except Exception as e:
         log(f"  [WARN] FA discovery: {e}")
         meta = rfa = ufa = None
-    data["fa_meta"] = meta or {}
+    data["fa_meta"] = fc["fa_meta"] = meta or fc.get("fa_meta") or {}
+    if meta:
+        fc["fa_meta"] = meta
     for key, found in (("rfa", rfa), ("ufa", ufa)):
         if found:
-            data[key] = found
+            data[key] = fc[key] = found
             log(f"  {key}: {len(found)} from thread")
+        elif fc.get(key):
+            data[key] = fc[key]
+            log(f"  {key}: {len(data[key])} from cache")
         else:
             try:
                 data[key] = scrape_fa_sheet(key)
@@ -685,24 +745,29 @@ def scrape_all(log=print):
 
     # FA results thread (board 12): phase posts for the current FA year
     data["fa_results"] = None
-    if meta and meta.get("year"):
+    if data["fa_meta"].get("year"):
         try:
             log("FA results thread...")
-            data["fa_results"] = scrape_fa_results(meta["year"])
+            data["fa_results"] = fc["fa_results"] = (
+                scrape_fa_results(data["fa_meta"]["year"]) or fc.get("fa_results"))
         except Exception as e:
-            log(f"  [WARN] fa results: {e}")
+            log(f"  [WARN] fa results ({e}), using cache")
+            data["fa_results"] = fc.get("fa_results")
 
-    # draft board: discover the newest draft thread's grades sheet; fall back
+    # draft board: discover the newest draft thread's grades sheet; cache; configured last
     try:
         log("draft thread discovery...")
         dmeta, dlist = discover_draft(log)
     except Exception as e:
         log(f"  [WARN] draft discovery: {e}")
         dmeta = dlist = None
-    data["draft_meta"] = dmeta or {}
+    data["draft_meta"] = fc["draft_meta"] = dmeta or fc.get("draft_meta") or {}
     if dlist:
-        data["draft"] = dlist
+        data["draft"] = fc["draft"] = dlist
         log(f"  draft: {len(dlist)} from thread")
+    elif fc.get("draft"):
+        data["draft"] = fc["draft"]
+        log(f"  draft: {len(data['draft'])} from cache")
     else:
         try:
             data["draft"] = scrape_draft_sheet()
@@ -711,4 +776,5 @@ def scrape_all(log=print):
             log(f"  [WARN] draft: {e}")
             data["draft"] = []
 
+    save_fcache(fc)
     return data

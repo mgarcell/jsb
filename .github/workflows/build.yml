@@ -22,6 +22,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install forum transport
+        run: pip install curl_cffi
+
       - name: Build site
         run: python kvbl_app/build.py
 
@@ -29,6 +32,6 @@ jobs:
         run: |
           git config user.name "kvbl-bot"
           git config user.email "actions@github.com"
-          git add docs/
+          git add docs/ kvbl_app/forum_cache.json
           git diff --cached --quiet || git commit -m "Refresh data $(date -u +'%Y-%m-%d %H:%M')"
           git push

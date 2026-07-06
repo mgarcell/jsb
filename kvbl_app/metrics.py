@@ -389,43 +389,43 @@ def compute_kv(all_players):
 # Draft pick valuation
 # ────────────────────────────────────────────────────────────
 def pick_curve(slot, rnd, years_out=0):
-    """Pick value in Trade-Value units.  A #1 overall ≈ 30: the expected TV of
-    a cheap young star discounted for draft uncertainty."""
-    base = 30 * math.exp(-(slot - 1) / 9.0) if rnd == 1 else 8 * math.exp(-(slot - 1) / 12.0)
+    """Pick value in Trade-Value units.  A #1 overall ≈ 40: the expected TV of
+    a young high-KV starter on a rookie deal, discounted for draft risk."""
+    base = 40 * math.exp(-(slot - 1) / 9.0) if rnd == 1 else 10 * math.exp(-(slot - 1) / 12.0)
     return round(base * 0.93 ** max(0, years_out), 1)
 
 
 # ────────────────────────────────────────────────────────────
 # Trade Value: what a player is actually worth in a deal
 # ────────────────────────────────────────────────────────────
-AGE_MULT = {"rising": 1.3, "improving": 1.15, "peak": 1.0, "declining": 0.8, "falling": 0.6}
+AGE_MULT = {"rising": 1.2, "improving": 1.1, "peak": 1.0, "declining": 0.75, "falling": 0.5}
 
 
 def compute_tv(all_players):
-    """TV is built to reflect trade reality, not roster percentile:
-      - production counts only ABOVE replacement level (BPM -2, freely
-        available in the signable pool) and scales superlinearly — stars are
-        scarce, two scrubs don't equal one starter
-      - young players carry future value, old players don't
-      - contract surplus: production priced at ~$2.2M per BPM point above
-        replacement, minus actual salary — an overpaid non-contributor is
-        NEGATIVE value (a salary dump)
+    """TV = (KV/100)³ × 100, then age/contract adjusted.
+
+    The cube is the point: talent value is convex.  KV 90 → 73 base while
+    KV 50 → 12.5 base, so one star ALWAYS beats a pile of role players
+    (2×50 = 25 ≪ 73; you can't paper over a star with quantity).
+
+      × age:      rising 1.2 · improving 1.1 · peak 1.0 · declining 0.75 · falling 0.5
+      × contract: +10% per extra year of control (max +30%)
+      + surplus:  fair salary for the KV level ((KV/100)² × $20M) minus actual
+                  salary, at 40¢ per $1M — overpaid non-contributors go negative.
     Rostered players only (needs a contract to be tradeable)."""
-    GROWTH = {"rising": 2.0, "improving": 1.0}     # expected BPM still to come
     for p in all_players:
-        if not p.get("team") or "_blend_bpm" not in p:
+        if not p.get("team") or p.get("KV") is None:
             continue
-        trend = age_trend(p.get("age", 27))
-        bpm = p["_blend_bpm"] + GROWTH.get(trend, 0.0)   # value the player they're becoming
+        kv = p["KV"] / 100.0
         contract = p.get("contract") or []
         sal = contract[0] if contract else 1.5
         years = max(1, len(contract))
-        prod = max(0.0, bpm + 2.0) ** 1.6
-        mult = AGE_MULT.get(trend, 1.0)
-        horizon = 1 + 0.15 * (min(years, 4) - 1) if prod > 0 else 1.0
-        fair = max(0.0, (bpm + 2.0) * 2.2)
-        surplus = (fair - sal) * 0.5
-        p["TV"] = round(max(-15.0, prod * mult * horizon + surplus), 1)
+        base = kv ** 3 * 100.0
+        mult = AGE_MULT.get(age_trend(p.get("age", 27)), 1.0)
+        horizon = 1 + 0.10 * (min(years, 4) - 1)
+        fair = kv ** 2 * 20.0
+        surplus = (fair - sal) * 0.4
+        p["TV"] = round(max(-12.0, base * mult * horizon + surplus), 1)
 
 
 def value_picks(data):
