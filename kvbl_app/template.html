@@ -174,7 +174,8 @@ window.showPlayer = function(name){
     </div></div>
   <div class="card" style="margin:8px 0"><h3>KV rating</h3>
     <div class="bar"><i style="width:${p.KV||0}%"></i></div>
-    <div class="small"><b>${p.KV!=null?p.KV.toFixed(0):"–"}</b>/100 league percentile — 70% BPM + 30% PER, stats & projection blended by minutes</div></div>`;
+    <div class="small"><b>${p.KV!=null?p.KV.toFixed(0):"–"}</b>/100 league percentile — 70% BPM + 30% PER, stats & projection blended by minutes</div>
+    ${p.TV!=null?`<div class="mrow" style="margin-top:6px"><span>Trade value <span class="small">(above-replacement prod. × age/contract + salary surplus)</span></span><b class="${p.TV<0?"err":""}">${p.TV.toFixed(1)}</b></div>`:""}</div>`;
   if(s && s.min>0) h+=`<div class="card" style="margin:8px 0"><h3>Season (${s.g} g, ${s.min.toFixed(1)} mpg)</h3>
     <div class="statline"><span><b>${s.ppg.toFixed(1)}</b> pts</span><span><b>${s.reb.toFixed(1)}</b> reb</span>
     <span><b>${s.ast.toFixed(1)}</b> ast</span><span><b>${s.stl.toFixed(1)}</b> stl</span><span><b>${s.blk.toFixed(1)}</b> blk</span>
@@ -219,7 +220,7 @@ function renderHome(){
     h+=`<div class="card"><h3>Injuries</h3>`+D.injuries.slice(0,15).map(i=>
       `<div class="mrow"><span>${esc(i.name)} <span class="badge">${esc(i.team)}</span></span><span class="small">${esc(i.injury)} · ${esc(i.days)}d</span></div>`).join("")+`</div>`;
   }
-  h+=`<div class="card"><h3>Latest official moves <span class="small">(forum · players at KV value, picks on pick curve)</span></h3>`+
+  h+=`<div class="card"><h3>Latest official moves <span class="small">(forum · assets priced in Trade Value)</span></h3>`+
     (D.transactions||[]).slice(0,15).map(t=>{
     let inner=`<div style="display:flex;gap:8px;align-items:baseline">
       <a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--fg);text-decoration:none;font-weight:600;flex:1">${esc(t.text)} <span class="small">↗</span></a>
@@ -286,7 +287,7 @@ function renderTeams(){
     const yrs=[...new Set(td.picks.map(p=>p.year).filter(Boolean))].sort();
     const cell=(y,r)=>{const ps=td.picks.filter(p=>p.year===y&&p.round===r);
       return ps.length?ps.map(p=>`<div>${p.from&&p.from!==curTeam?`<b class="ok">from ${esc(p.from)}</b>`:"own"} <span class="badge">${p.value??""}</span></div>`).join(""):`<span class="dn">—</span>`;};
-    h+=`<h3 style="margin-top:8px">Draft picks <span class="small">(badge = est. value 0-100)</span></h3>
+    h+=`<h3 style="margin-top:8px">Draft picks <span class="small">(badge = Trade Value; #1 overall ≈ 30)</span></h3>
     <table><tr><th>Year</th><th>Round 1</th><th>Round 2</th></tr>${
       yrs.map(y=>`<tr><td>${String(y)}-${String(y+1).slice(2)}</td><td>${cell(y,1)}</td><td>${cell(y,2)}</td></tr>`).join("")}</table>`;
   }
@@ -303,11 +304,11 @@ const pickLabel=pk=>`${String(pk.year).slice(2)}-${String(pk.year+1).slice(2)} R
 function tside(team,key){
   const td=D.teams[team]; if(!td) return "";
   const sel=T[key], pkey=key==="pa"?"ka":"kb", psel=T[pkey];
-  let h=`<div class="trside">${td.players.slice().sort((a,b)=>(b.KV||0)-(a.KV||0)).map(p=>{
+  let h=`<div class="trside">${td.players.slice().sort((a,b)=>(b.TV||0)-(a.TV||0)).map(p=>{
     const on=sel.includes(p.name);
     return `<span class="pick-pill" style="${on?"border-color:var(--accent);background:var(--purple)":""}"
       onclick="tToggle('${key}','${esc(p.name).replace(/'/g,"\\'")}')">${esc(p.name.split(" ").pop())}
-      <span class="small">${Math.round(p.KV||0)}·${money(salary(p))}</span></span>`;}).join("")}</div>`;
+      <span class="small" style="color:var(--gold)">${(p.TV??0).toFixed(0)}</span><span class="small">${money(salary(p))}</span></span>`;}).join("")}</div>`;
   const pks=(td.picks||[]).filter(pk=>pk.year);
   if(pks.length) h+=`<div class="small" style="margin:4px 0 2px">picks:</div><div class="trside">${
     pks.map((pk,i)=>{const on=psel.includes(i);
@@ -328,7 +329,7 @@ function tStats(team,names,pickIdx){
     bpm:ps.reduce((a,p)=>a+(p.sBPM??p.pBPM??0),0),
     pbpm:ps.reduce((a,p)=>a+(p.pBPM??0),0),
     kv:ps.length?ps.reduce((a,p)=>a+(p.KV||0),0)/ps.length:0,
-    kvsum:ps.reduce((a,p)=>a+(p.KV||0),0),
+    tvsum:ps.reduce((a,p)=>a+(p.TV||0),0),
     pv:pks.reduce((a,pk)=>a+(pk.value||0),0), ps, pks};
 }
 window.tClear=()=>{T.pa=[];T.pb=[];T.ka=[];T.kb=[];tSave();};
@@ -348,18 +349,18 @@ function renderTrade(){
       <div class="small" style="margin:4px 0 2px">sends:</div>${tside(T.b,"pb")}</div>
   </div></div>`;
   if(A.n||B.n||A.pks.length||B.pks.length){
-    // what each side RECEIVES: total value = incoming players' KV + incoming pick values
-    const inA=B.kvsum+B.pv, inB=A.kvsum+A.pv, margin=Math.abs(inA-inB);
+    // what each side RECEIVES: total = incoming players' Trade Value + pick values
+    const inA=B.tvsum+B.pv, inB=A.tvsum+A.pv, margin=Math.abs(inA-inB);
     const winner=margin<1?null:(inA>inB?T.a:T.b);
-    const recv=(me,st)=>`<div style="margin:4px 0"><b>${esc(me)} receive</b> <b style="float:right">${(st.kvsum+st.pv).toFixed(0)} value</b>
-      <div class="small">${[...st.ps.map(p=>`${esc(p.name)} <span style="color:var(--gold)">${Math.round(p.KV||0)}</span>`),
+    const recv=(me,st)=>`<div style="margin:4px 0"><b>${esc(me)} receive</b> <b style="float:right">${(st.tvsum+st.pv).toFixed(0)} TV</b>
+      <div class="small">${[...st.ps.map(p=>`${esc(p.name)} <span style="color:${(p.TV||0)<0?"var(--bad)":"var(--gold)"}">${(p.TV??0).toFixed(0)}</span>`),
         ...st.pks.map(pk=>`${pk.year}-${String(pk.year+1).slice(2)} R${pk.round} <span style="color:var(--gold)">${Math.round(pk.value)}</span>`)].join(" · ")||"nothing"}</div>
       <div class="small">talent impact: BPM ${fmt1(st.bpm)} now · ${fmt1(st.pbpm)} projected · salary ${money(st.sal)}</div></div>`;
     h+=`<div class="card"><h3>Who wins the trade?</h3>
     ${recv(T.a,B)}${recv(T.b,A)}
     <div style="text-align:center;padding:6px;background:var(--panel2);border-radius:8px;margin:6px 0">
-      ${winner?`🏆 <b class="ok">${esc(winner)}</b> win — <b>+${margin.toFixed(0)}</b> more total value received`:"⚖️ Dead even on total value"}</div>
-    <div class="small">Value = player KV ratings + pick values, both on the same 0-100 scale. BPM lines show on-court impact gained per team.</div>
+      ${winner?`🏆 <b class="ok">${esc(winner)}</b> win — <b>+${margin.toFixed(0)}</b> more Trade Value received`:"⚖️ Dead even on Trade Value"}</div>
+    <div class="small">TV = production above replacement (superlinear — stars are scarce, scrubs ≈ 0), × age & contract-years, + salary surplus. Overpaid non-contributors go <b class="err">negative</b>. Picks are on the same scale (#1 overall ≈ 30).</div>
     <h3 style="margin-top:8px">Cap check</h3>
     <div class="mrow"><span>${esc(T.a)} payroll after</span><b class="${newA>HARD?"err":newA>CAP?"flat":"ok"}">${money(newA)}${newA>HARD?" — OVER HARD CAP":newA>CAP?" (over cap)":""}</b></div>
     <div class="mrow"><span>${esc(T.b)} payroll after</span><b class="${newB>HARD?"err":newB>CAP?"flat":"ok"}">${money(newB)}${newB>HARD?" — OVER HARD CAP":newB>CAP?" (over cap)":""}</b></div>
@@ -486,8 +487,9 @@ function renderDraft(){
 window.dSet=(name,k,v)=>{dnotes[name]=dnotes[name]||{};dnotes[name][k]=k==="rank"?(+v||null):v;LS.set("dnotes",dnotes);if(k==="rank")renderDraft();};
 
 /* ───────── DEPTH CHART ───────── */
-const DC = LS.get("depth",{slots:{PG:[],SG:[],SF:[],PF:[],C:[]},set:{},ir:{}});
+const DC = LS.get("depth",{slots:{PG:[],SG:[],SF:[],PF:[],C:[]},set:{},ir:{},snap:null,bold:true});
 if(!DC.ir) DC.ir={};
+if(DC.bold===undefined) DC.bold=true;
 function lastName(n){return n.trim().split(/\s+/).pop();}
 function renderDepth(){
   const roster=(D.teams[MY]?D.teams[MY].players:[]).slice().sort((a,b)=>(b.KV||0)-(a.KV||0));
@@ -522,26 +524,51 @@ function renderDepth(){
   }
   /* validation */
   const irNames=roster.map(p=>p.name).filter(n=>DC.ir[n]);
-  const benched=roster.map(p=>p.name).filter(n=>!DC.ir[n]&&!activeNames.includes(n));
+  const noRole=roster.map(p=>p.name).filter(n=>!DC.ir[n]&&!activeNames.includes(n));
+  const totalActive=activeNames.length+noRole.length;
   const totalMin=activeNames.reduce((a,n)=>a+(DC.set[n]?.min||0),0);
   const checks=[
-    [activeNames.length>=10,`${activeNames.length}/10+ active players`],
+    [totalActive>=10,`${totalActive}/10+ active (${activeNames.length} playing, ${noRole.length} no-role)`],
     [totalMin===240,`total minutes ${totalMin}/240`],
     ...["PG","SG","SF","PF","C"].map(pos=>[DC.slots[pos].length>=2,`${pos}: ${DC.slots[pos].length}/2+`]),
     [activeNames.every(n=>(DC.set[n]?.min||0)<=40),"max 40 min each"],
-    [benched.length===0,benched.length?`unplaced & not IR: ${benched.map(lastName).join(", ")}`:"everyone placed or IR"],
   ];
   h+=`</div><div class="card"><h3>Checks</h3>${checks.map(([ok,t])=>
     `<div class="mrow"><span>${t}</span><b class="${ok?"ok":"err"}">${ok?"✓":"✗"}</b></div>`).join("")}</div>`;
-  /* output */
-  const out=["PG","SG","SF","PF","C"].map(pos=>`${pos}: ${DC.slots[pos].map(lastName).join(", ")}`).join("\n")
-    +"\n\n"+activeNames.map(n=>{const s=DC.set[n];return `${lastName(n)}: ${s.min}/${s.off}/${s.def}/${s.s1}/${s.s2}/${s.s3}`}).join("\n")
-    +"\n\nIR: "+(irNames.length?irNames.map(lastName).join(", "):"the rest");
-  h+=`<div class="card"><h3>Forum post</h3><textarea id="dc-out" readonly>${esc(out)}</textarea>
+  /* output with change-bolding vs last submitted snapshot */
+  const out=dcBuild(activeNames,noRole,irNames);
+  h+=`<div class="card"><h3>Forum post</h3>
+    <label class="small" style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <input type="checkbox" ${DC.bold?"checked":""} onchange="DC.bold=this.checked;LS.set('depth',DC);renderDepth()">
+      Bold changes vs last submitted${DC.snap?"":" <b class='flat'>(no snapshot yet — tap “Mark submitted” after you post)</b>"}</label>
+    <textarea id="dc-out" readonly>${esc(out)}</textarea>
     <div style="display:flex;gap:8px;margin-top:6px">
-      <button class="primary" style="flex:1" onclick="copyText($('#dc-out').value)">📋 Copy depth chart</button>
-      <button onclick="dcClear()">✕ Clear</button></div></div>`;
+      <button class="primary" style="flex:1" onclick="copyText($('#dc-out').value)">📋 Copy</button>
+      <button onclick="dcSnap()">✓ Mark submitted</button>
+      <button onclick="dcClear()">✕ Clear</button></div>
+    <div class="note" style="margin:6px 0 0">“Mark submitted” saves this exact chart as the baseline — every later edit gets &lt;b&gt; tags. Untick bolding for season/playoff-start posts.</div></div>`;
   $("#pg-depth").innerHTML=h;
+}
+function dcBuild(activeNames,noRole,irNames){
+  const snap=(DC.bold&&DC.snap)?DC.snap:null;
+  const bl=(txt,changed)=>(snap&&changed)?`<b>${txt}</b>`:txt;
+  const snapPlaced=snap?[...new Set(Object.values(snap.slots).flat())]:[];
+  const snapNoRole=snap?Object.keys(snap.roster||{}).filter(n=>!snap.ir[n]&&!snapPlaced.includes(n)):[];
+  const lines=["PG","SG","SF","PF","C"].map(pos=>
+    `${pos}: ${DC.slots[pos].map(n=>bl(lastName(n),!(snap?.slots?.[pos]||[]).includes(n))).join(", ")}`);
+  const setLines=activeNames.map(n=>{
+    const s=DC.set[n], tok=[s.min,s.off,s.def,s.s1,s.s2,s.s3].map(String);
+    const line=`${lastName(n)}: ${tok.join("/")}`;
+    if(!snap) return line;
+    const old=snap.set?.[n];
+    if(!old) return `<b>${line}</b>`;                       // newly in the lineup
+    const oldTok=[old.min,old.off,old.def,old.s1,old.s2,old.s3].map(String);
+    return `${lastName(n)}: ${tok.map((t,i)=>bl(t,t!==oldTok[i])).join("/")}`;
+  });
+  let out=lines.join("\n")+"\n\n"+setLines.join("\n");
+  if(noRole.length) out+="\n\nActive, but no role: "+noRole.map(n=>bl(lastName(n),!snapNoRole.includes(n))).join(", ");
+  out+="\n\nIR: "+(irNames.length?irNames.map(n=>bl(lastName(n),!(snap?.ir?.[n]))).join(", "):"the rest");
+  return out;
 }
 window.dcAdd=(pos,n)=>{if(n){DC.slots[pos].push(n);LS.set("depth",DC);renderDepth();}};
 window.dcRemove=(pos,n)=>{DC.slots[pos]=DC.slots[pos].filter(x=>x!==n);LS.set("depth",DC);renderDepth();};
@@ -550,8 +577,13 @@ window.dcActive=n=>{
   if(DC.ir[n]) delete DC.ir[n];
   else{DC.ir[n]=1;for(const pos in DC.slots)DC.slots[pos]=DC.slots[pos].filter(x=>x!==n);delete DC.set[n];}
   LS.set("depth",DC);renderDepth();};
-window.dcClear=()=>{if(!confirm("Clear the entire depth chart? This wipes positions, minutes and IR flags."))return;
+window.dcClear=()=>{if(!confirm("Clear the entire depth chart? This wipes positions, minutes and IR flags (the submitted snapshot is kept)."))return;
   DC.slots={PG:[],SG:[],SF:[],PF:[],C:[]};DC.set={};DC.ir={};LS.set("depth",DC);renderDepth();};
+window.dcSnap=()=>{
+  const roster={};(D.teams[MY]?D.teams[MY].players:[]).forEach(p=>roster[p.name]=1);
+  DC.snap=JSON.parse(JSON.stringify({slots:DC.slots,set:DC.set,ir:DC.ir,roster}));
+  LS.set("depth",DC);renderDepth();
+  alert("Snapshot saved — from now on, edits get <b> tags in the output.");};
 
 /* ───────── shared ───────── */
 window.copyText=t=>{navigator.clipboard.writeText(t).then(()=>{

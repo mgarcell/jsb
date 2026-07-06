@@ -389,8 +389,43 @@ def compute_kv(all_players):
 # Draft pick valuation
 # ────────────────────────────────────────────────────────────
 def pick_curve(slot, rnd, years_out=0):
-    base = 100 * math.exp(-(slot - 1) / 9.0) if rnd == 1 else 32 * math.exp(-(slot - 1) / 12.0)
+    """Pick value in Trade-Value units.  A #1 overall ≈ 30: the expected TV of
+    a cheap young star discounted for draft uncertainty."""
+    base = 30 * math.exp(-(slot - 1) / 9.0) if rnd == 1 else 8 * math.exp(-(slot - 1) / 12.0)
     return round(base * 0.93 ** max(0, years_out), 1)
+
+
+# ────────────────────────────────────────────────────────────
+# Trade Value: what a player is actually worth in a deal
+# ────────────────────────────────────────────────────────────
+AGE_MULT = {"rising": 1.3, "improving": 1.15, "peak": 1.0, "declining": 0.8, "falling": 0.6}
+
+
+def compute_tv(all_players):
+    """TV is built to reflect trade reality, not roster percentile:
+      - production counts only ABOVE replacement level (BPM -2, freely
+        available in the signable pool) and scales superlinearly — stars are
+        scarce, two scrubs don't equal one starter
+      - young players carry future value, old players don't
+      - contract surplus: production priced at ~$2.2M per BPM point above
+        replacement, minus actual salary — an overpaid non-contributor is
+        NEGATIVE value (a salary dump)
+    Rostered players only (needs a contract to be tradeable)."""
+    GROWTH = {"rising": 2.0, "improving": 1.0}     # expected BPM still to come
+    for p in all_players:
+        if not p.get("team") or "_blend_bpm" not in p:
+            continue
+        trend = age_trend(p.get("age", 27))
+        bpm = p["_blend_bpm"] + GROWTH.get(trend, 0.0)   # value the player they're becoming
+        contract = p.get("contract") or []
+        sal = contract[0] if contract else 1.5
+        years = max(1, len(contract))
+        prod = max(0.0, bpm + 2.0) ** 1.6
+        mult = AGE_MULT.get(trend, 1.0)
+        horizon = 1 + 0.15 * (min(years, 4) - 1) if prod > 0 else 1.0
+        fair = max(0.0, (bpm + 2.0) * 2.2)
+        surplus = (fair - sal) * 0.5
+        p["TV"] = round(max(-15.0, prod * mult * horizon + surplus), 1)
 
 
 def value_picks(data):
@@ -484,7 +519,7 @@ def evaluate_transactions(data, byname):
                 else:
                     p = byname.get(norm_name(asset))
                     if p:
-                        items.append({"label": p["name"], "val": p.get("KV")})
+                        items.append({"label": p["name"], "val": p.get("TV", p.get("KV"))})
                     elif len(asset) > 2:
                         items.append({"label": asset, "val": None})
             sides.append({"team": citymap.get(norm_name(city), city), "items": items})
@@ -582,6 +617,7 @@ def compute_all(data, log=print):
     everyone = rostered + fa_list
     compute_projected(everyone, models, league_pace, league_ptstsa, -8.0, -4.0)
     compute_kv(everyone)
+    compute_tv(everyone)     # needs _blend_bpm from compute_kv, pre-stripping
 
     # eligibility: accent-insensitive name match against the eligibility sheet;
     # players not on the sheet fall back to their listed position
