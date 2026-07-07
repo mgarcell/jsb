@@ -134,8 +134,9 @@ const teamRec = t => { const s=D.standings.find(x=>x.team===t); return s?`${s.w}
 const dcThread = t => { const k=Object.keys(D.dc_threads||{}).find(k=>k.includes(t.toLowerCase()));
   return k?D.dc_threads[k]:null; };
 
+const pfMin = p => (p.s&&p.s.min>0)?(p.s.pf||0)/p.s.min:null;
 function playerRow(p, extra=""){
-  const s=salary(p);
+  const s=salary(p), fpm=pfMin(p);
   return `<div class="prow" onclick="showPlayer('${esc(p.name).replace(/'/g,"\\'")}')">
     <div class="kv" style="background:${kvColor(p.KV||0)}">${p.KV!=null?Math.round(p.KV):"–"}</div>
     <div class="who">
@@ -145,7 +146,7 @@ function playerRow(p, extra=""){
     </div>
     <div class="nums">
       BPM ${fmt1(p.sBPM??p.pBPM)} (${fmt1(p.sOBPM??p.pOBPM)}/${fmt1(p.sDBPM??p.pDBPM)})<br>
-      PER ${(p.sPER??p.pPER)??"–"} · proj ${fmt1(p.pBPM)}
+      PER ${(p.sPER??p.pPER)??"–"} · proj ${fmt1(p.pBPM)}${fpm!=null?` · ${fpm.toFixed(2)} pf/m`:""}
     </div></div>`;
 }
 
@@ -179,7 +180,8 @@ window.showPlayer = function(name){
   if(s && s.min>0) h+=`<div class="card" style="margin:8px 0"><h3>Season (${s.g} g, ${s.min.toFixed(1)} mpg)</h3>
     <div class="statline"><span><b>${s.ppg.toFixed(1)}</b> pts</span><span><b>${s.reb.toFixed(1)}</b> reb</span>
     <span><b>${s.ast.toFixed(1)}</b> ast</span><span><b>${s.stl.toFixed(1)}</b> stl</span><span><b>${s.blk.toFixed(1)}</b> blk</span>
-    <span><b>${s.to.toFixed(1)}</b> to</span><span><b>${s.fgp.toFixed(1)}</b> fg%</span><span><b>${s["3gp"].toFixed(1)}</b> 3p%</span></div></div>`;
+    <span><b>${s.to.toFixed(1)}</b> to</span><span><b>${s.fgp.toFixed(1)}</b> fg%</span><span><b>${s["3gp"].toFixed(1)}</b> 3p%</span>
+    <span><b>${(s.pf||0).toFixed(1)}</b> pf</span><span><b>${((s.pf||0)/s.min).toFixed(2)}</b> pf/min</span></div></div>`;
   if(p.rchg){
     const ch=Object.entries(p.rchg.diff);
     h+=`<div class="card" style="margin:8px 0"><h3>Development — changed since ${esc(p.rchg.d)}</h3>
@@ -251,7 +253,8 @@ const P = {q:"", pos:"ALL", sort:"KV", pool:"rostered"};
 function renderPlayers(){
   const sorts={KV:"KV",BPM:p=>p.sBPM??p.pBPM,OBPM:p=>p.sOBPM??p.pOBPM,DBPM:p=>p.sDBPM??p.pDBPM,
     pBPM:"pBPM",PER:p=>p.sPER??p.pPER,Age:p=>-p.age,Salary:p=>salary(p)||0,
-    Value:p=>{const s=salary(p);return s?(p.KV||0)/s:0}};
+    Value:p=>{const s=salary(p);return s?(p.KV||0)/s:0},
+    "PF/min":p=>pfMin(p)??-1};
   let h=`<div class="searchbar"><input id="pq" placeholder="Search player…" value="${esc(P.q)}">
     <select id="ppool"><option value="rostered">Rostered</option><option value="all">+ FAs</option></select>
     <select id="psort">${Object.keys(sorts).map(k=>`<option${k===P.sort?" selected":""}>${k}</option>`).join("")}</select></div>
