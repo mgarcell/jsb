@@ -180,6 +180,12 @@ window.showPlayer = function(name){
     <div class="statline"><span><b>${s.ppg.toFixed(1)}</b> pts</span><span><b>${s.reb.toFixed(1)}</b> reb</span>
     <span><b>${s.ast.toFixed(1)}</b> ast</span><span><b>${s.stl.toFixed(1)}</b> stl</span><span><b>${s.blk.toFixed(1)}</b> blk</span>
     <span><b>${s.to.toFixed(1)}</b> to</span><span><b>${s.fgp.toFixed(1)}</b> fg%</span><span><b>${s["3gp"].toFixed(1)}</b> 3p%</span></div></div>`;
+  if(p.rchg){
+    const ch=Object.entries(p.rchg.diff);
+    h+=`<div class="card" style="margin:8px 0"><h3>Development — changed since ${esc(p.rchg.d)}</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${ch.map(([k,v])=>
+        `<span class="pick-pill">${k} <b class="${v>0?"ok":"err"}">${v>0?"+":""}${v}</b></span>`).join("")}</div></div>`;
+  }
   h+=`<h3 style="margin-left:2px">Ratings</h3><div class="rgrid">`+
     rk.map(k=>`<div><div class="lab">${k}</div><div class="val">${r[k]??"–"}</div></div>`).join("")+`</div>
   <div class="rgrid" style="grid-template-columns:repeat(8,1fr)">`+
@@ -370,9 +376,57 @@ function renderTrade(){
       <button onclick="tClear()">✕ Clear</button></div></div>
     <div class="note">Rules: min-contract-only trades in-season need a player or R2 back · over-hard-cap after deadline = lose Bird rights + next R1</div>`;
   }
+  /* ── trade finder: who's out there, and what would it take ── */
+  h+=`<div class="card"><h3>🔎 Trade finder <span class="small">(targets on other teams + a package that gets close)</span></h3>
+  <div class="chips" style="padding:4px 0">${["ALL","PG","SG","SF","PF","C"].map(x=>
+    `<button class="${TF.pos===x?"on":""}" onclick="TF.pos='${x}';renderTrade()">${x}</button>`).join("")}
+    <select onchange="TF.minkv=+this.value;renderTrade()">${[85,75,65].map(v=>
+      `<option value="${v}"${TF.minkv===v?" selected":""}>KV ${v}+</option>`).join("")}</select></div>`;
+  let cands=ALL.filter(p=>p.team&&p.team!==MY&&(p.KV||0)>=TF.minkv&&(TF.pos==="ALL"||elig(p).includes(TF.pos)));
+  cands.sort((a,b)=>(b.TV||0)-(a.TV||0));
+  h+=cands.slice(0,10).map(p=>{
+    const pkg=tfPackage(p.TV||0);
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+      <div style="display:flex;gap:8px;align-items:baseline" onclick="showPlayer('${esc(p.name).replace(/'/g,"\\'")}')">
+        <b style="flex:1">${esc(p.name)}</b><span class="small">${eligStr(p)} · ${esc(p.team)} · ${money(salary(p))}</span>
+        <span style="color:var(--gold)">TV ${(p.TV??0).toFixed(0)}</span></div>
+      <div class="small">offer ≈ ${pkg?`${pkg.labels.join(" + ")} <span style="color:var(--gold)">(${pkg.sum.toFixed(0)})</span>`:"more than you've got"}</div></div>`;}).join("")
+    ||`<div class="small">no matches — lower the KV filter</div>`;
+  h+=`</div>`;
+  /* ── league positional strength: find the surplus/deficit teams ── */
+  const POS5=["PG","SG","SF","PF","C"];
+  const cell=(t,pos)=>{const ps=D.teams[t].players.filter(p=>elig(p).includes(pos))
+      .map(p=>p.KV||0).sort((a,b)=>b-a).slice(0,2);
+    return ps.length?ps.reduce((a,b)=>a+b,0)/ps.length:0;};
+  h+=`<div class="card"><h3>Positional strength <span class="small">(avg KV of top-2 eligible — hunt the deficits)</span></h3>
+  <div class="scroll"><table><tr><th>Team</th>${POS5.map(p=>`<th>${p}</th>`).join("")}</tr>${
+    Object.keys(D.teams).sort().map(t=>`<tr${t===MY?' style="color:var(--accent);font-weight:700"':""} onclick="openTeam('${esc(t)}')">
+      <td>${esc(t)}</td>${POS5.map(pos=>{const v=cell(t,pos);
+        return `<td style="background:rgba(124,92,255,${Math.max(0,(v-25))/130})">${v.toFixed(0)}</td>`;}).join("")}</tr>`).join("")}</table></div></div>`;
   $("#pg-trade").innerHTML=h;
   $("#ta").addEventListener("change",e=>{T.a=e.target.value;T.pa=[];tSave()});
   $("#tb").addEventListener("change",e=>{T.b=e.target.value;T.pb=[];tSave()});
+}
+const TF={pos:"ALL",minkv:75};
+function tfPackage(target){
+  if(!target||target<=0) return null;
+  const mine=(D.teams[MY]?.players||[]).filter(p=>(p.TV||0)>0)
+    .map(p=>({label:lastName(p.name),tv:p.TV}));
+  const picks=(D.teams[MY]?.picks||[]).filter(pk=>pk.year)
+    .map(pk=>({label:pickLabel(pk),tv:pk.value||0}));
+  const assets=[...mine,...picks].sort((a,b)=>b.tv-a.tv).slice(0,9);
+  let best=null;
+  const consider=idx=>{
+    const sum=idx.reduce((a,i)=>a+assets[i].tv,0);
+    if(sum<0.85*target) return;
+    const score=Math.abs(sum-1.05*target)+idx.length*2;   // prefer small packages
+    if(!best||score<best.score) best={score,sum,labels:idx.map(i=>assets[i].label)};
+  };
+  const n=assets.length;
+  for(let i=0;i<n;i++){consider([i]);
+    for(let j=i+1;j<n;j++){consider([i,j]);
+      for(let k=j+1;k<n;k++)consider([i,j,k]);}}
+  return best;
 }
 window.copyTrade=()=>{
   const A=tStats(T.a,T.pa,T.ka),B=tStats(T.b,T.pb,T.kb);
@@ -501,10 +555,11 @@ function renderDepth(){
     ${roster.map(p=>`<span class="pick-pill" style="${DC.ir[p.name]?"opacity:.5;border-color:var(--bad)":""}"
       onclick="dcActive('${esc(p.name).replace(/'/g,"\\'")}')">${esc(lastName(p.name))}
       <b style="color:${DC.ir[p.name]?"var(--bad)":"var(--good)"}">${DC.ir[p.name]?"IR":"✓"}</b></span>`).join("")}</div>
-  <div class="card"><h3>Assign positions</h3>`;
+  <div class="card"><h3 style="display:flex;align-items:center">Assign positions
+    <button class="mini" style="margin-left:auto" onclick="dcOptimize()">⚡ Auto-fill (max BPM)</button></h3>`;
   for(const pos of ["PG","SG","SF","PF","C"]){
     h+=`<div class="dc-line"><b style="width:2.4em">${pos}</b>`;
-    for(const n of DC.slots[pos]) h+=`<span class="pick-pill">${esc(lastName(n))}<b onclick="dcRemove('${pos}','${esc(n).replace(/'/g,"\\'")}')">✕</b></span>`;
+    for(const n of DC.slots[pos]) h+=`<span class="pick-pill" onclick="showPlayer('${esc(n).replace(/'/g,"\\'")}')">${esc(lastName(n))}<b onclick="event.stopPropagation();dcRemove('${pos}','${esc(n).replace(/'/g,"\\'")}')">✕</b></span>`;
     h+=`<select onchange="dcAdd('${pos}',this.value)"><option value="">+ add</option>${
       roster.filter(p=>!DC.ir[p.name]&&elig(p).includes(pos)&&!DC.slots[pos].includes(p.name))
         .map(p=>`<option>${esc(p.name)}</option>`).join("")}
@@ -514,11 +569,12 @@ function renderDepth(){
   <div class="small" style="margin-bottom:4px">minutes / off style (o·d·p) / def style / <b>off focus</b> / <b>def focus</b> / <b>ball-handling focus</b></div>`;
   const activeNames=[...new Set(Object.values(DC.slots).flat())];
   for(const n of activeNames){
-    const s=DC.set[n]||(DC.set[n]={min:20,off:"d",def:"o",s1:"-",s2:"-",s3:"-"});
+    const s=DC.set[n]||(DC.set[n]={min:20,off:"-",def:"-",s1:"-",s2:"-",s3:"-"});
     const opts=(cur,vals)=>vals.map(v=>`<option${String(cur)===String(v)?" selected":""}>${v}</option>`).join("");
-    h+=`<div class="dc-line"><span style="width:6.5em;overflow:hidden;text-overflow:ellipsis">${esc(lastName(n))}</span>
-      <input type="number" style="width:3.6em" value="${s.min}" min="0" max="40" onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','min',+this.value)">
-      ${["off","def"].map(k=>`<select onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','${k}',this.value)">${opts(s[k],["o","d","p"])}</select>`).join("")}
+    h+=`<div class="dc-line"><span style="width:6.5em;overflow:hidden;text-overflow:ellipsis;color:var(--accent)"
+        onclick="showPlayer('${esc(n).replace(/'/g,"\\'")}')">${esc(lastName(n))}</span>
+      <input type="number" style="width:3.6em" value="${s.min}" min="0" max="48" onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','min',+this.value)">
+      ${["off","def"].map(k=>`<select onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','${k}',this.value)">${opts(s[k],["-","o","d","p"])}</select>`).join("")}
       ${["s1","s2","s3"].map(k=>`<select onchange="dcSet('${esc(n).replace(/'/g,"\\'")}','${k}',this.value)">${opts(s[k],["-","-2","-1","1","2"])}</select>`).join("")}
     </div>`;
   }
@@ -529,12 +585,11 @@ function renderDepth(){
   const totalMin=activeNames.reduce((a,n)=>a+(DC.set[n]?.min||0),0);
   const checks=[
     [totalActive>=10,`${totalActive}/10+ active (${activeNames.length} playing, ${noRole.length} no-role)`],
-    [totalMin===240,`total minutes ${totalMin}/240`],
     ...["PG","SG","SF","PF","C"].map(pos=>[DC.slots[pos].length>=2,`${pos}: ${DC.slots[pos].length}/2+`]),
-    [activeNames.every(n=>(DC.set[n]?.min||0)<=40),"max 40 min each"],
   ];
   h+=`</div><div class="card"><h3>Checks</h3>${checks.map(([ok,t])=>
-    `<div class="mrow"><span>${t}</span><b class="${ok?"ok":"err"}">${ok?"✓":"✗"}</b></div>`).join("")}</div>`;
+    `<div class="mrow"><span>${t}</span><b class="${ok?"ok":"err"}">${ok?"✓":"✗"}</b></div>`).join("")}
+    <div class="mrow"><span>total minutes <span class="small">(240 fills all five 48-min positions)</span></span><b>${totalMin}</b></div></div>`;
   /* output with change-bolding vs last submitted snapshot */
   const out=dcBuild(activeNames,noRole,irNames);
   h+=`<div class="card"><h3>Forum post</h3>
@@ -579,6 +634,29 @@ window.dcActive=n=>{
   LS.set("depth",DC);renderDepth();};
 window.dcClear=()=>{if(!confirm("Clear the entire depth chart? This wipes positions, minutes and IR flags (the submitted snapshot is kept)."))return;
   DC.slots={PG:[],SG:[],SF:[],PF:[],C:[]};DC.set={};DC.ir={};LS.set("depth",DC);renderDepth();};
+window.dcOptimize=()=>{
+  if(!confirm("Replace the current chart with a BPM-optimized suggestion? (IR flags and each player's styles/focuses are kept)"))return;
+  const roster=(D.teams[MY]?D.teams[MY].players:[]).filter(p=>!DC.ir[p.name]);
+  const bpm=p=>p.sBPM??p.pBPM??-5;
+  const POS=["PG","SG","SF","PF","C"];
+  const eligAt=pos=>roster.filter(p=>elig(p).includes(pos));
+  // scarcest positions choose first, best BPM eligible fills each slot;
+  // starters get 36 minutes, backups 12 → 240 total across 10 players
+  const order=POS.slice().sort((a,b)=>eligAt(a).length-eligAt(b).length);
+  const used=new Set(), slots={PG:[],SG:[],SF:[],PF:[],C:[]};
+  for(const round of [0,1])
+    for(const pos of order){
+      const c=eligAt(pos).filter(p=>!used.has(p.name)).sort((a,b)=>bpm(b)-bpm(a))[0];
+      if(c){used.add(c.name);slots[pos][round]=c.name;}
+    }
+  const set={};
+  for(const pos of POS){
+    slots[pos]=slots[pos].filter(Boolean);
+    slots[pos].forEach((n,i)=>{
+      const old=DC.set[n]||{off:"-",def:"-",s1:"-",s2:"-",s3:"-"};
+      set[n]={min:i===0?36:12,off:old.off,def:old.def,s1:old.s1,s2:old.s2,s3:old.s3};});
+  }
+  DC.slots=slots;DC.set=set;LS.set("depth",DC);renderDepth();};
 window.dcSnap=()=>{
   const roster={};(D.teams[MY]?D.teams[MY].players:[]).forEach(p=>roster[p.name]=1);
   DC.snap=JSON.parse(JSON.stringify({slots:DC.slots,set:DC.set,ir:DC.ir,roster}));

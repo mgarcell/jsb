@@ -23,6 +23,49 @@ import metrics
 HERE = os.path.dirname(os.path.abspath(__file__))
 DOCS = os.path.join(os.path.dirname(HERE), "docs")
 CACHE = os.path.join(HERE, ".cache.json")
+HISTORY = os.path.join(HERE, "ratings_history.json")
+
+
+def update_history(data):
+    """Append a ratings snapshot per player WHENEVER THEIR RATINGS CHANGE
+    (they only change at season rollovers, so the file grows one entry per
+    player per season).  This is the raw material for a future aging /
+    progression model — the app itself only gets a tiny 'what changed last'
+    diff per player, so current-season views stay uncluttered."""
+    try:
+        with open(HISTORY, encoding="utf-8") as f:
+            hist = json.load(f)
+    except Exception:
+        hist = {}
+
+    today = datetime.date.today().isoformat()
+    season = data.get("league", {}).get("season", 0)
+    everyone = ([p for td in data["teams"].values() for p in td["players"]]
+                + data.get("fa_pool", []))
+    changed = 0
+    for p in everyone:
+        r = p.get("r")
+        if not r:
+            continue
+        key = scrape.norm_name(p["name"])
+        entries = hist.setdefault(key, [])
+        if entries and entries[-1]["r"] == r:
+            pass                                  # unchanged — no churn
+        else:
+            entries.append({"d": today, "season": season, "name": p["name"],
+                            "team": p.get("team", ""), "pos": p.get("pos", ""),
+                            "age": p.get("age", 0), "r": r})
+            changed += 1
+        if len(entries) >= 2:
+            prev, last = entries[-2], entries[-1]
+            diff = {k: v - prev["r"].get(k, 0)
+                    for k, v in last["r"].items() if v != prev["r"].get(k, 0)}
+            if diff:
+                p["rchg"] = {"d": prev["d"], "diff": diff}
+
+    with open(HISTORY, "w", encoding="utf-8") as f:
+        json.dump(hist, f, separators=(",", ":"))
+    print(f"History: {len(hist)} players tracked, {changed} new snapshots")
 
 
 def main():
@@ -35,6 +78,7 @@ def main():
     else:
         data = scrape.scrape_all()
         data = metrics.compute_all(data)
+        update_history(data)
         data["built"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         with open(CACHE, "w", encoding="utf-8") as f:
             json.dump(data, f, separators=(",", ":"))
