@@ -8,8 +8,9 @@ git add -A docs kvbl_app/forum_cache.json kvbl_app/ratings_history.json
 git commit -m "Refresh data (local)"
 git pull --rebase origin main
 if errorlevel 1 (
-  git checkout --ours docs/index.html
-  git add docs/index.html
+  rem generated files: the fresh local build wins over the bot's version
+  git checkout --ours docs/index.html kvbl_app/ratings_history.json kvbl_app/forum_cache.json 2>nul
+  git add docs/index.html kvbl_app/ratings_history.json kvbl_app/forum_cache.json 2>nul
   git rebase --continue
 )
 git push
