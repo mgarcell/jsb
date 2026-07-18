@@ -613,6 +613,19 @@ def compute_all(data, log=print):
             fas[key] = q
     fa_list = list(fas.values())
 
+    # enrich FAs with their last rostered season: team pages keep stats rows
+    # for departed players, so UFAs get real sBPM/sPER/pf alongside projections
+    stat_by = {}
+    for p in rostered:
+        if p.get("s") and p["s"].get("min", 0) > 0:
+            stat_by.setdefault(norm_name(p["name"]), p)
+    for f in fa_list:
+        src = stat_by.get(norm_name(f["name"]))
+        if src:
+            for k in ("s", "sBPM", "sOBPM", "sDBPM", "sPER"):
+                if k in src and k not in f:
+                    f[k] = src[k]
+
     log("projected metrics (rostered + FAs)...")
     everyone = rostered + fa_list
     compute_projected(everyone, models, league_pace, league_ptstsa, -8.0, -4.0)
@@ -647,4 +660,8 @@ def compute_all(data, log=print):
     # raw source lists are folded into fa_pool / transactions — don't ship twice
     for k in ("ufa", "rfa", "available", "fapreview"):
         data.pop(k, None)
+    # stats-only ghost rows (players who left the team) served their purpose in
+    # the team-level BPM math and now live on enriched FA entries — drop them
+    for td in teams.values():
+        td["players"] = [p for p in td["players"] if p.get("r")]
     return data

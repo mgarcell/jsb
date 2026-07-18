@@ -441,6 +441,9 @@ window.copyTrade=()=>{
 
 /* ───────── FREE AGENCY ───────── */
 const F = {tab:"Avail", q:"", pos:"ALL", sort:"KV"};
+const FSORTS={KV:p=>p.KV??-99, BPM:p=>p.sBPM??p.pBPM??-99, OBPM:p=>p.sOBPM??p.pOBPM??-99,
+  DBPM:p=>p.sDBPM??p.pDBPM??-99, pBPM:p=>p.pBPM??-99, pOBPM:p=>p.pOBPM??-99, pDBPM:p=>p.pDBPM??-99,
+  PER:p=>p.sPER??p.pPER??-99, pPER:p=>p.pPER??-99, Age:p=>-p.age, "PF/min":p=>pfMin(p)??-1};
 const stars = new Set(LS.get("stars",[]));
 window.toggleStar=n=>{stars.has(n)?stars.delete(n):stars.add(n);LS.set("stars",[...stars]);renderFA();};
 function renderFA(){
@@ -458,7 +461,7 @@ function renderFA(){
   <div class="chips">${["Avail","Up next","+2 yrs","UFA","RFA","⭐"].map(x=>
     `<button class="${F.tab===x?"on":""}" onclick="F.tab='${x}';renderFA()">${x}</button>`).join("")}</div>
   <div class="searchbar"><input id="fq" placeholder="Search…" value="${esc(F.q)}">
-    <select id="fsort">${["KV","pBPM","pOBPM","pDBPM","pPER","Age"].map(k=>`<option${k===F.sort?" selected":""}>${k}</option>`).join("")}</select></div>
+    <select id="fsort">${Object.keys(FSORTS).map(k=>`<option${k===F.sort?" selected":""}>${k}</option>`).join("")}</select></div>
   <div class="chips">${["ALL","PG","SG","SF","PF","C"].map(x=>
     `<button class="${F.pos===x?"on":""}" onclick="F.pos='${x}';renderFA()">${x}</button>`).join("")}</div>`;
   let list = F.tab==="⭐" ? FA.concat(ALL).filter(p=>stars.has(p.name))
@@ -468,7 +471,7 @@ function renderFA(){
     : FA.filter(p=>p.fa===F.tab);
   if(F.pos!=="ALL") list=list.filter(p=>elig(p).includes(F.pos));
   if(F.q) list=list.filter(p=>p.name.toLowerCase().includes(F.q.toLowerCase()));
-  const key=F.sort==="Age"?(p=>-p.age):(p=>p[F.sort]??-99);
+  const key=FSORTS[F.sort]||FSORTS.KV;
   list.sort((a,b)=>key(b)-key(a));
   h+=list.slice(0,120).map(p=>`<div style="display:flex;align-items:center${p.res?";opacity:.45":""}">
     <div style="flex:1">${playerRow(p, (p.yrs!=null?` · ${p.yrs} yrs svc`:"")+(p.res?" · ✓ off board":""))}</div>
