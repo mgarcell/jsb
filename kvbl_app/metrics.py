@@ -19,7 +19,9 @@ Computes, for every rostered player:
 Free agents / rookies (ratings only, no team) get the p-metrics and KV.
 """
 
+import json
 import math
+import os
 import re
 
 from scrape import norm_name
@@ -259,8 +261,18 @@ def fit_projections(all_players, log=print):
             row[k] = s.get(k, 0) * m36
         row["drb"] = (s.get("reb", 0) - s.get("orb", 0)) * m36
         sample.append(row)
+    # A fresh season wipes every stat line, so there is nothing to regress on.
+    # Fall back to the last good fit (model_cache.json, committed) — the sim's
+    # rating→stat relationships carry over between seasons.
     if len(sample) < 30:
-        log(f"  [WARN] only {len(sample)} qualifying players for projection fit")
+        cached = load_model_cache()
+        if cached:
+            log(f"  only {len(sample)} qualifying players — using cached model fit")
+            return cached
+        if not sample:
+            log("  no stats and no cached fit — using built-in prior coefficients")
+            return dict(PRIOR_MODELS)
+        log(f"  [WARN] only {len(sample)} players to fit on; projections may be noisy")
 
     models = {}
     def fit(target, rating_keys):
@@ -280,7 +292,47 @@ def fit_projections(all_players, log=print):
     fit("blk",  ["blk"])
     fit("to",   ["to", "2ga", "ast"])    # high to-rating = fewer TOs; usage adds TOs
     fit("pf",   ["blk", "orb"])          # bigs foul more; weak but stable
+    save_model_cache(models)
     return models
+
+
+MODEL_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_cache.json")
+
+# Last-resort rating→per-36 coefficients, fitted on the 2011 season (279
+# players).  Used only when there are no stats to fit on AND no cached fit,
+# so projections still work on a clean checkout mid-offseason.
+PRIOR_MODELS = {
+    "fga2": (["2ga"], [0.18742, 1.16338]),
+    "fgm2": (["2ga", "2g%"], [0.0661, 0.18403, -7.67091]),
+    "fta": (["fta"], [0.12761, 0.58386]),
+    "ftm": (["fta", "ft%"], [0.09473, 0.05155, -3.26253]),
+    "3ga": (["3ga"], [0.10378, 0.17492]),
+    "3gm": (["3ga", "3g%"], [0.03445, 0.00297, -0.08397]),
+    "orb": (["orb"], [0.05479, 0.13747]),
+    "drb": (["drb"], [0.10689, 0.29052]),
+    "ast": (["ast"], [0.09704, 0.0157]),
+    "stl": (["stl"], [0.0363, -0.1526]),
+    "blk": (["blk"], [0.04816, 0.01443]),
+    "to": (["to", "2ga", "ast"], [-0.04249, -0.00318, 0.00301, 4.34121]),
+    "pf": (["blk", "orb"], [0.00145, -0.00171, 3.70204]),
+}
+
+
+def load_model_cache():
+    try:
+        with open(MODEL_CACHE, encoding="utf-8") as f:
+            return {t: (m["keys"], m["beta"]) for t, m in json.load(f).items()}
+    except Exception:
+        return None
+
+
+def save_model_cache(models):
+    try:
+        with open(MODEL_CACHE, "w", encoding="utf-8") as f:
+            json.dump({t: {"keys": ks, "beta": [round(b, 5) for b in beta]}
+                       for t, (ks, beta) in models.items()}, f, separators=(",", ":"))
+    except Exception:
+        pass
 
 
 def project36(r, models):
@@ -328,19 +380,23 @@ def compute_projected(all_players, models, league_pace, league_ptstsa,
                                   OBPM_POS_CONST, OBPM_ROLE_CONST)
         raws.append(p)
 
-    # calibrate: rostered players' minutes-weighted pBPM mean must be 0 (like sBPM)
+    # calibrate: rostered players' minutes-weighted pBPM mean must be 0 (like sBPM).
+    # Between seasons there are no minutes, so fall back to weighting every
+    # rostered player equally — the scale stays anchored to the league.
     ros = [p for p in raws if p.get("s") and p["s"].get("min", 0) > 0]
     if ros:
-        w = sum(p["s"]["min"] * p["s"]["g"] for p in ros)
-        shift_b = -sum(p["_praw_bpm"] * p["s"]["min"] * p["s"]["g"] for p in ros) / w
-        shift_o = -sum(p["_praw_obpm"] * p["s"]["min"] * p["s"]["g"] for p in ros) / w
+        wt = {id(p): p["s"]["min"] * p["s"]["g"] for p in ros}
     else:
-        shift_b, shift_o = avg_tadj_bpm, avg_tadj_obpm
-    # pPER scale: minutes-weighted mean 15 on rostered
+        ros = [p for p in raws if p.get("team")]
+        wt = {id(p): 1.0 for p in ros}
     if ros:
-        mean = sum(p["_puper"] * p["s"]["min"] * p["s"]["g"] for p in ros) / w
+        w = sum(wt.values())
+        shift_b = -sum(p["_praw_bpm"] * wt[id(p)] for p in ros) / w
+        shift_o = -sum(p["_praw_obpm"] * wt[id(p)] for p in ros) / w
+        mean = sum(p["_puper"] * wt[id(p)] for p in ros) / w
         pscale = 15.0 / mean if mean else 1.0
     else:
+        shift_b, shift_o = avg_tadj_bpm, avg_tadj_obpm
         pscale = 1.0
     for p in raws:
         p["pBPM"] = round(p["_praw_bpm"] + shift_b, 1)
@@ -428,6 +484,91 @@ def compute_tv(all_players):
         p["TV"] = round(max(-12.0, base * mult * horizon + surplus), 1)
 
 
+STATS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "stats_cache.json")
+
+
+def stats_fallback(data, log=print):
+    """Between seasons kvbl.net zeroes every stat line.  Rather than let the
+    whole app degrade to projections, carry last season's stats forward until
+    the first sim of the new season replaces them.
+
+    Players with no cached line (rookies, new signings) simply have no stats —
+    every downstream metric already falls back to ratings-only projections for
+    them, and KV weights stats by minutes played, so they're excluded naturally.
+    """
+    teams = data["teams"]
+    live = sum(1 for td in teams.values() for p in td["players"]
+               if p.get("s") and p["s"].get("min", 0) > 0)
+
+    if live >= 50:                      # real season in progress — refresh cache
+        payload = {
+            "players": {norm_name(p["name"]): p["s"]
+                        for td in teams.values() for p in td["players"]
+                        if p.get("s") and p["s"].get("min", 0) > 0},
+            "teams": {t: {"off": td.get("team_off"), "def": td.get("team_def")}
+                      for t, td in teams.items()},
+        }
+        try:
+            with open(STATS_CACHE, "w", encoding="utf-8") as f:
+                json.dump(payload, f, separators=(",", ":"))
+        except Exception as e:
+            log(f"  [WARN] stats cache write: {e}")
+        data["stats_stale"] = False
+        return
+
+    try:
+        with open(STATS_CACHE, encoding="utf-8") as f:
+            cache = json.load(f)
+    except Exception:
+        log("  [WARN] no stats on site and no cached stats — ratings only")
+        data["stats_stale"] = False
+        return
+
+    n = 0
+    for t, td in teams.items():
+        tc = cache.get("teams", {}).get(t)
+        if tc and tc.get("off") and tc.get("def"):
+            td["team_off"], td["team_def"] = tc["off"], tc["def"]
+        for p in td["players"]:
+            s = cache.get("players", {}).get(norm_name(p["name"]))
+            if s:
+                p["s"] = s
+                n += 1
+    data["stats_stale"] = True
+    log(f"  season reset detected — carried last season's stats for {n} players "
+        f"({sum(len(td['players']) for td in teams.values()) - n} on projections only)")
+
+
+STANDINGS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "standings_cache.json")
+
+
+def slot_basis(data):
+    """Standings to rank draft slots by.  A freshly reset season has every team
+    at 0-0, which would make slots arbitrary — and last season's final table is
+    what actually sets the draft order anyway, so use the cached one until real
+    games are played."""
+    cur = data.get("standings") or []
+    played = sum(s["w"] + s["l"] for s in cur)
+    if played > 0:
+        try:
+            with open(STANDINGS_CACHE, "w", encoding="utf-8") as f:
+                json.dump([{k: s[k] for k in ("team", "conf", "w", "l", "pct")}
+                           for s in cur], f, separators=(",", ":"))
+        except Exception:
+            pass
+        return cur, False
+    try:
+        with open(STANDINGS_CACHE, encoding="utf-8") as f:
+            cached = json.load(f)
+        if cached:
+            return cached, True
+    except Exception:
+        pass
+    return cur, False
+
+
 def value_picks(data):
     """Attach an estimated slot + 0-100 value to every pick on every team.
 
@@ -436,9 +577,11 @@ def value_picks(data):
     Value curve (0-100, comparable to KV): R1 = 100·e^-(slot-1)/9,
     R2 = 32·e^-(slot-1)/12, then discounted 7%/season of waiting.
     """
-    order = sorted(data["standings"], key=lambda s: (s["pct"], -s["l"]))
+    basis, from_cache = slot_basis(data)
+    order = sorted(basis, key=lambda s: (s["pct"], -s["l"]))
     slot = {s["team"]: i + 1 for i, s in enumerate(order)}
     n = len(order) or 26
+    data["league"]["slots_from"] = "last season" if from_cache else "current standings"
 
     start_years = []
     for td in data["teams"].values():
@@ -467,7 +610,8 @@ def evaluate_transactions(data, byname):
     """Parse each trade post ('X receives: a, b, 2014 first round pick'),
     price every asset (players at KV, picks on the pick curve using the
     sending team's projected slot) and declare a winner."""
-    order = sorted(data["standings"], key=lambda s: (s["pct"], -s["l"]))
+    basis, _ = slot_basis(data)
+    order = sorted(basis, key=lambda s: (s["pct"], -s["l"]))
     slot = {s["team"]: i + 1 for i, s in enumerate(order)}
     nicks = [s["team"] for s in data["standings"]]
 
@@ -575,6 +719,8 @@ def age_trend(age):
 # ────────────────────────────────────────────────────────────
 def compute_all(data, log=print):
     teams = data["teams"]
+    log("stats check...")
+    stats_fallback(data, log)
     rostered = [p for td in teams.values() for p in td["players"]]
 
     log("sBPM...")

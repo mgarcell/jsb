@@ -32,6 +32,8 @@ jobs:
         run: |
           git config user.name "kvbl-bot"
           git config user.email "actions@github.com"
-          git add docs/ kvbl_app/forum_cache.json kvbl_app/ratings_history.json
+          git add docs/ kvbl_app/forum_cache.json kvbl_app/ratings_history.json \
+                  kvbl_app/stats_cache.json kvbl_app/model_cache.json \
+                  kvbl_app/standings_cache.json
           git diff --cached --quiet || git commit -m "Refresh data $(date -u +'%Y-%m-%d %H:%M')"
           git push

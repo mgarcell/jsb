@@ -177,7 +177,7 @@ window.showPlayer = function(name){
     <div class="bar"><i style="width:${p.KV||0}%"></i></div>
     <div class="small"><b>${p.KV!=null?p.KV.toFixed(0):"–"}</b>/100 league percentile — 70% BPM + 30% PER, stats & projection blended by minutes</div>
     ${p.TV!=null?`<div class="mrow" style="margin-top:6px"><span>Trade value <span class="small">(KV³ curve × age/contract ± salary surplus)</span></span><b class="${p.TV<0?"err":""}">${p.TV.toFixed(1)}</b></div>`:""}</div>`;
-  if(s && s.min>0) h+=`<div class="card" style="margin:8px 0"><h3>Season (${s.g} g, ${s.min.toFixed(1)} mpg)</h3>
+  if(s && s.min>0) h+=`<div class="card" style="margin:8px 0"><h3>${D.stats_stale?"Last season":"Season"} (${s.g} g, ${s.min.toFixed(1)} mpg)</h3>
     <div class="statline"><span><b>${s.ppg.toFixed(1)}</b> pts</span><span><b>${s.reb.toFixed(1)}</b> reb</span>
     <span><b>${s.ast.toFixed(1)}</b> ast</span><span><b>${s.stl.toFixed(1)}</b> stl</span><span><b>${s.blk.toFixed(1)}</b> blk</span>
     <span><b>${s.to.toFixed(1)}</b> to</span><span><b>${s.fgp.toFixed(1)}</b> fg%</span><span><b>${s["3gp"].toFixed(1)}</b> 3p%</span>
@@ -209,6 +209,7 @@ function renderHome(){
   const conf = {};
   for(const s of D.standings) (conf[s.conf]=conf[s.conf]||[]).push(s);
   let h=`<h2>🏀 KVBL HQ <span class="small" style="font-weight:400">built ${D.built||""}</span></h2>
+  ${D.stats_stale?`<div class="note" style="color:var(--warn)">⚠ New season — the site has no stats yet, so BPM/PER/pf are <b>last season's</b>. Players with no prior line (rookies, new signings) are rated from ratings only. Draft slots use ${esc(D.league.slots_from||"last season")}. Everything switches over automatically after sim 1.</div>`:""}
   <div class="card" style="cursor:pointer" onclick="openTeam('${esc(MY)}')"><h3>${esc(MY)} — ${my.w??"?"}-${my.l??"?"} (#${rank} overall) <span class="small">tap for team page ›</span></h3>
     <div class="small">Payroll ${money(payroll)} · Cap $${CAP}M · Hard cap $${HARD}M
       ${td.ctx?` · Net ${fmt1(td.ctx.net)} (O ${td.ctx.ortg} / D ${td.ctx.drtg})`:""}</div>
